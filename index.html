@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SpriteForge - Interactive Sprite Sheet Slicer</title>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <!-- CSS -->
+  <script type="module" crossorigin src="./assets/index-BSP1ZgdH.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-Dh_aruHN.css">
+</head>
+<body class="dark-theme">
+  <!-- Background Ambient Glows -->
+  <div class="ambient-glow glow-1"></div>
+  <div class="ambient-glow glow-2"></div>
+
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="header-logo">
+        <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+          <line x1="9" y1="3" x2="9" y2="21" />
+          <line x1="15" y1="3" x2="15" y2="21" />
+          <line x1="3" y1="9" x2="21" y2="9" />
+          <line x1="3" y1="15" x2="21" y2="15" />
+        </svg>
+        <h1>SpriteForge</h1>
+        <span class="badge">v1.0.0</span>
+      </div>
+      <div class="header-actions">
+        <button id="btn-theme-toggle" class="btn-icon" title="Toggle Theme" aria-label="Toggle Theme">
+          <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="5"></circle>
+            <line x1="12" y1="1" x2="12" y2="3"></line>
+            <line x1="12" y1="21" x2="12" y2="23"></line>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+            <line x1="1" y1="12" x2="3" y2="12"></line>
+            <line x1="21" y1="12" x2="23" y2="12"></line>
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <main class="app-body">
+      
+      <!-- Left Sidebar: Controls & Files -->
+      <aside class="sidebar-panel">
+        
+        <!-- File Queue Section -->
+        <section class="panel-section" id="section-files">
+          <h2 class="section-title">
+            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+            Source Images
+          </h2>
+          
+          <div class="file-dropzone" id="dropzone">
+            <input type="file" id="file-input" multiple accept="image/png, image/jpeg" class="hidden-input">
+            <svg class="drop-icon" viewBox="0 0 24 24" width="32" height="32" stroke="currentColor" stroke-width="2" fill="none">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="17 8 12 3 7 8"></polyline>
+              <line x1="12" y1="3" x2="12" y2="15"></line>
+            </svg>
+            <div class="drop-text">
+              <strong>Drag & Drop PNGs</strong> or <span class="browse-link">Browse Files</span>
+            </div>
+            <div class="drop-subtext">Select multiple files for batch slicing</div>
+          </div>
+
+          <div class="file-list-container">
+            <ul class="file-list" id="file-list">
+              <!-- Dynamically populated files -->
+            </ul>
+          </div>
+        </section>
+
+        <!-- Slicing Settings Section -->
+        <section class="panel-section" id="section-settings">
+          <h2 class="section-title">
+            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+            Slicing Configuration
+          </h2>
+
+          <!-- Mode Select -->
+          <div class="control-group">
+            <label class="control-label">Slicing Mode</label>
+            <div class="segmented-control">
+              <button id="mode-grid" class="control-btn active" data-mode="grid">Grid Size</button>
+              <button id="mode-auto" class="control-btn" data-mode="auto">Auto-Detect</button>
+            </div>
+          </div>
+
+          <!-- Grid Mode Settings -->
+          <div id="settings-grid" class="mode-settings-panel">
+            <div class="input-grid">
+              <div class="input-field">
+                <label for="grid-w">Width (px)</label>
+                <input type="number" id="grid-w" value="32" min="1">
+              </div>
+              <div class="input-field">
+                <label for="grid-h">Height (px)</label>
+                <input type="number" id="grid-h" value="32" min="1">
+              </div>
+            </div>
+            <button id="btn-detect-grid" class="btn btn-secondary w-full" style="padding: 6px 12px; margin-top: 4px; font-size: 11px;" title="Analyze the image to auto-detect the standard grid size">
+              <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2.5" fill="none" style="display:inline-block; vertical-align:middle; margin-right: 4px;"><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+              Auto-Detect Grid Size
+            </button>
+          </div>
+
+          <!-- Auto-Detect Mode Settings -->
+          <div id="settings-auto" class="mode-settings-panel hidden">
+            <div class="input-grid">
+              <div class="input-field">
+                <label for="auto-min-w" title="Minimum width of detected objects">Min W (px)</label>
+                <input type="number" id="auto-min-w" value="8" min="1">
+              </div>
+              <div class="input-field">
+                <label for="auto-min-h" title="Minimum height of detected objects">Min H (px)</label>
+                <input type="number" id="auto-min-h" value="8" min="1">
+              </div>
+              <div class="input-field">
+                <label for="auto-tolerance" title="Alpha values below this are considered transparent (0-255)">Alpha Limit</label>
+                <input type="number" id="auto-tolerance" value="5" min="0" max="255">
+              </div>
+              <div class="input-field">
+                <label for="auto-row-gap" title="Max Y distance to group slices into the same row">Row Gap (px)</label>
+                <input type="number" id="auto-row-gap" value="12" min="0">
+              </div>
+            </div>
+          </div>
+
+          <!-- Common Export Settings -->
+          <div class="control-group spacer-top">
+            <label class="control-label">Export Filters</label>
+            <label class="checkbox-container">
+              <input type="checkbox" id="opt-skip-empty" checked>
+              <span class="checkmark"></span>
+              Skip empty transparent slices
+            </label>
+          </div>
+
+          <div class="control-group">
+            <label for="opt-naming" class="control-label">File Naming Template</label>
+            <input type="text" id="opt-naming" value="sprite_{row}_{col}" placeholder="sprite_{row}_{col}">
+            <div class="naming-help">Placeholders: <code>{row}</code>, <code>{col}</code>, <code>{index}</code></div>
+          </div>
+
+          <div class="action-buttons-container">
+            <button id="btn-apply-all" class="btn btn-secondary w-full" title="Apply current settings to all uploaded images">
+              Apply to All Files
+            </button>
+          </div>
+        </section>
+      </aside>
+
+      <!-- Center: Visualizer Canvas Viewport -->
+      <section class="canvas-panel">
+        <!-- Canvas Toolbar -->
+        <div class="canvas-toolbar">
+          <div class="image-info" id="image-info">No image loaded</div>
+          <div class="viewport-controls">
+            <button id="btn-zoom-out" class="btn-icon-sm" title="Zoom Out">
+              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            </button>
+            <span class="zoom-level" id="zoom-level">100%</span>
+            <button id="btn-zoom-in" class="btn-icon-sm" title="Zoom In">
+              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            </button>
+            <button id="btn-zoom-fit" class="btn-text-sm" title="Fit Screen">Fit</button>
+            <button id="btn-zoom-reset" class="btn-text-sm" title="100% Zoom">1:1</button>
+          </div>
+        </div>
+
+        <!-- Canvas Container -->
+        <div class="canvas-viewport" id="canvas-viewport">
+          <div class="canvas-container" id="canvas-container">
+            <!-- Loading overlay -->
+            <div class="loading-overlay hidden" id="loading-overlay">
+              <div class="spinner"></div>
+              <span>Detecting Sprites...</span>
+            </div>
+            <!-- Canvas -->
+            <canvas id="slicer-canvas"></canvas>
+          </div>
+        </div>
+
+        <!-- Help instructions -->
+        <div class="canvas-footer-tip">
+          <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" class="tip-icon"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+          Drag to PAN. Scroll wheel to ZOOM. Left-click a box to TOGGLE export on individual frames.
+        </div>
+      </section>
+
+      <!-- Right/Bottom Panel: Sprite Slices Preview -->
+      <aside class="preview-panel">
+        <div class="preview-header">
+          <h2 class="section-title">
+            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><rect x="3" y="3" width="7" height="9"></rect><rect x="14" y="3" width="7" height="5"></rect><rect x="14" y="12" width="7" height="9"></rect><rect x="3" y="16" width="7" height="5"></rect></svg>
+            Sliced Frames Preview (<span id="preview-count">0</span>)
+          </h2>
+          <div class="preview-actions">
+            <button id="btn-toggle-all-slices" class="btn-text-sm">Select None</button>
+          </div>
+        </div>
+
+        <div class="preview-grid-wrapper">
+          <div class="preview-grid" id="preview-grid">
+            <!-- Dynamically populated thumbnails -->
+            <div class="no-sprites-msg">No sprites generated yet. Load an image and adjust slicing configuration.</div>
+          </div>
+        </div>
+
+        <!-- Export Action Footer -->
+        <div class="export-footer">
+          <div class="export-stats" id="export-stats">
+            Ready to export 0 slices.
+          </div>
+          <!-- Download Buttons -->
+          <div class="export-actions">
+            <button id="btn-export-active" class="btn btn-primary" disabled>
+              <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" class="btn-icon-svg"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              Export Selected ZIP
+            </button>
+            <button id="btn-export-all-batch" class="btn btn-accent" disabled>
+              <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" class="btn-icon-svg"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path><polyline points="9 13 12 16 15 13"></polyline><line x1="12" y1="10" x2="12" y2="16"></line></svg>
+              Export Batch (ZIP)
+            </button>
+          </div>
+          
+          <!-- Export Progress Bar -->
+          <div class="progress-bar-container hidden" id="export-progress-container">
+            <div class="progress-bar-header">
+              <span id="progress-status-text">Exporting sprites...</span>
+              <span id="progress-percent">0%</span>
+            </div>
+            <div class="progress-track">
+              <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <!-- Toast Notification System -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- JavaScript Entry Point -->
+</body>
+</html>

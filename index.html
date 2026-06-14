@@ -1,6 +1,30 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <script>
+    (function() {
+      if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+        const s = document.createElement('script');
+        s.src = './coi-serviceworker.js';
+        document.head.appendChild(s);
+      } else {
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.getRegistrations().then(function(registrations) {
+            for (let registration of registrations) {
+              if (registration.active && registration.active.scriptURL.includes('coi-serviceworker')) {
+                registration.unregister().then(function(unregistered) {
+                  if (unregistered) {
+                    console.log('Unregistered coi-serviceworker for local development.');
+                    window.location.reload();
+                  }
+                });
+              }
+            }
+          });
+        }
+      }
+    })();
+  </script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SpriteForge - Interactive Sprite Sheet Slicer</title>
@@ -30,6 +54,17 @@
         <h1>SpriteForge</h1>
         <span class="badge">v1.0.0</span>
       </div>
+
+      <!-- Workspace Switcher Tabs -->
+      <div class="workspace-switcher" style="display: flex; gap: 4px; background: var(--bg-surface-solid); border: 1px solid var(--border-color); padding: 3px; border-radius: 8px;">
+        <button id="ws-btn-slicer" class="control-btn active" style="padding: 6px 14px; font-size: 11px;" data-mode="slicer">
+          Sprite Slicer
+        </button>
+        <button id="ws-btn-video" class="control-btn" style="padding: 6px 14px; font-size: 11px;" data-mode="video">
+          Video Extractor
+        </button>
+      </div>
+
       <div class="header-actions">
         <button id="btn-theme-toggle" class="btn-icon" title="Toggle Theme" aria-label="Toggle Theme">
           <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
@@ -50,170 +85,487 @@
     <!-- Main Workspace -->
     <main class="app-body">
       
-      <!-- Left Sidebar: Controls & Files -->
+        <!-- Left Sidebar: Controls & Files -->
       <aside class="sidebar-panel">
         
-        <!-- File Queue Section -->
-        <section class="panel-section" id="section-files">
-          <h2 class="section-title">
-            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
-            Source Images
-          </h2>
-          
-          <div class="file-dropzone" id="dropzone">
-            <input type="file" id="file-input" multiple accept="image/png, image/jpeg" class="hidden-input">
-            <svg class="drop-icon" viewBox="0 0 24 24" width="32" height="32" stroke="currentColor" stroke-width="2" fill="none">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-              <polyline points="17 8 12 3 7 8"></polyline>
-              <line x1="12" y1="3" x2="12" y2="15"></line>
-            </svg>
-            <div class="drop-text">
-              <strong>Drag & Drop PNGs</strong> or <span class="browse-link">Browse Files</span>
-            </div>
-            <div class="drop-subtext">Select multiple files for batch slicing</div>
-          </div>
-
-          <div class="file-list-container">
-            <ul class="file-list" id="file-list">
-              <!-- Dynamically populated files -->
-            </ul>
-          </div>
-        </section>
-
-        <!-- Slicing Settings Section -->
-        <section class="panel-section" id="section-settings">
-          <h2 class="section-title">
-            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
-            Slicing Configuration
-          </h2>
-
-          <!-- Mode Select -->
-          <div class="control-group">
-            <label class="control-label">Slicing Mode</label>
-            <div class="segmented-control">
-              <button id="mode-grid" class="control-btn active" data-mode="grid">Grid Size</button>
-              <button id="mode-auto" class="control-btn" data-mode="auto">Auto-Detect</button>
-            </div>
-          </div>
-
-          <!-- Grid Mode Settings -->
-          <div id="settings-grid" class="mode-settings-panel">
-            <div class="input-grid">
-              <div class="input-field">
-                <label for="grid-w">Width (px)</label>
-                <input type="number" id="grid-w" value="32" min="1">
+        <!-- Slicer Mode Sidebar Content -->
+        <div id="slicer-sidebar-content" style="display: flex; flex-direction: column; height: 100%; width: 100%;">
+          <!-- File Queue Section -->
+          <section class="panel-section" id="section-files" style="border-bottom: 1px solid var(--border-color); padding: 20px;">
+            <h2 class="section-title">
+              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+              Source Images
+            </h2>
+            
+            <div class="file-dropzone" id="dropzone">
+              <input type="file" id="file-input" multiple accept="image/png, image/jpeg" class="hidden-input">
+              <svg class="drop-icon" viewBox="0 0 24 24" width="32" height="32" stroke="currentColor" stroke-width="2" fill="none">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="17 8 12 3 7 8"></polyline>
+                <line x1="12" y1="3" x2="12" y2="15"></line>
+              </svg>
+              <div class="drop-text">
+                <strong>Drag & Drop PNGs</strong> or <span class="browse-link">Browse Files</span>
               </div>
-              <div class="input-field">
-                <label for="grid-h">Height (px)</label>
-                <input type="number" id="grid-h" value="32" min="1">
+              <div class="drop-subtext">Select multiple files for batch slicing</div>
+            </div>
+
+            <div class="file-list-container">
+              <ul class="file-list" id="file-list">
+                <!-- Dynamically populated files -->
+              </ul>
+            </div>
+          </section>
+
+          <!-- Slicing Settings Section -->
+          <section class="panel-section" id="section-settings" style="flex: 1; overflow-y: auto; padding: 20px;">
+            <h2 class="section-title">
+              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+              Slicing Configuration
+            </h2>
+
+            <!-- Mode Select -->
+            <div class="control-group">
+              <label class="control-label">Slicing Mode</label>
+              <div class="segmented-control">
+                <button id="mode-grid" class="control-btn active" data-mode="grid">Grid Size</button>
+                <button id="mode-auto" class="control-btn" data-mode="auto">Auto-Detect</button>
               </div>
             </div>
-            <button id="btn-detect-grid" class="btn btn-secondary w-full" style="padding: 6px 12px; margin-top: 4px; font-size: 11px;" title="Analyze the image to auto-detect the standard grid size">
-              <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2.5" fill="none" style="display:inline-block; vertical-align:middle; margin-right: 4px;"><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
-              Auto-Detect Grid Size
-            </button>
-          </div>
 
-          <!-- Auto-Detect Mode Settings -->
-          <div id="settings-auto" class="mode-settings-panel hidden">
-            <div class="input-grid">
-              <div class="input-field">
-                <label for="auto-min-w" title="Minimum width of detected objects">Min W (px)</label>
-                <input type="number" id="auto-min-w" value="8" min="1">
+            <!-- Grid Mode Settings -->
+            <div id="settings-grid" class="mode-settings-panel">
+              <div class="input-grid">
+                <div class="input-field">
+                  <label for="grid-w">Width (px)</label>
+                  <input type="number" id="grid-w" value="32" min="1">
+                </div>
+                <div class="input-field">
+                  <label for="grid-h">Height (px)</label>
+                  <input type="number" id="grid-h" value="32" min="1">
+                </div>
               </div>
-              <div class="input-field">
-                <label for="auto-min-h" title="Minimum height of detected objects">Min H (px)</label>
-                <input type="number" id="auto-min-h" value="8" min="1">
-              </div>
-              <div class="input-field">
-                <label for="auto-tolerance" title="Alpha values below this are considered transparent (0-255)">Alpha Limit</label>
-                <input type="number" id="auto-tolerance" value="5" min="0" max="255">
-              </div>
-              <div class="input-field">
-                <label for="auto-row-gap" title="Max Y distance to group slices into the same row">Row Gap (px)</label>
-                <input type="number" id="auto-row-gap" value="12" min="0">
+              <button id="btn-detect-grid" class="btn btn-secondary w-full" style="padding: 6px 12px; margin-top: 4px; font-size: 11px;" title="Analyze the image to auto-detect the standard grid size">
+                <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2.5" fill="none" style="display:inline-block; vertical-align:middle; margin-right: 4px;"><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+                Auto-Detect Grid Size
+              </button>
+            </div>
+
+            <!-- Auto-Detect Mode Settings -->
+            <div id="settings-auto" class="mode-settings-panel hidden">
+              <div class="input-grid">
+                <div class="input-field">
+                  <label for="auto-min-w" title="Minimum width of detected objects">Min W (px)</label>
+                  <input type="number" id="auto-min-w" value="8" min="1">
+                </div>
+                <div class="input-field">
+                  <label for="auto-min-h" title="Minimum height of detected objects">Min H (px)</label>
+                  <input type="number" id="auto-min-h" value="8" min="1">
+                </div>
+                <div class="input-field">
+                  <label for="auto-tolerance" title="Alpha values below this are considered transparent (0-255)">Alpha Limit</label>
+                  <input type="number" id="auto-tolerance" value="5" min="0" max="255">
+                </div>
+                <div class="input-field">
+                  <label for="auto-row-gap" title="Max Y distance to group slices into the same row">Row Gap (px)</label>
+                  <input type="number" id="auto-row-gap" value="12" min="0">
+                </div>
               </div>
             </div>
-          </div>
 
-          <!-- Common Export Settings -->
-          <div class="control-group spacer-top">
-            <label class="control-label">Export Filters</label>
-            <label class="checkbox-container">
-              <input type="checkbox" id="opt-skip-empty" checked>
-              <span class="checkmark"></span>
-              Skip empty transparent slices
-            </label>
-          </div>
+            <!-- Background Removal Section -->
+            <div class="control-group spacer-top">
+              <label class="control-label">Background Removal</label>
+              <label class="checkbox-container">
+                <input type="checkbox" id="opt-bg-removal">
+                <span class="checkmark"></span>
+                Enable Background Removal
+              </label>
+              
+              <div id="bg-removal-settings" class="mode-settings-panel hidden" style="margin-top: 6px;">
+                <div class="input-field" style="margin-bottom: 8px;">
+                  <label for="opt-bg-removal-method">Method</label>
+                  <select id="opt-bg-removal-method" style="width: 100%;">
+                    <option value="chromakey">Chroma Key (색상 기반 제거)</option>
+                    <option value="ai">AI Smart Removal (로컬 AI 스마트 제거)</option>
+                  </select>
+                </div>
 
-          <div class="control-group">
-            <label for="opt-naming" class="control-label">File Naming Template</label>
-            <input type="text" id="opt-naming" value="sprite_{row}_{col}" placeholder="sprite_{row}_{col}">
-            <div class="naming-help">Placeholders: <code>{row}</code>, <code>{col}</code>, <code>{index}</code></div>
-          </div>
+                <!-- Chroma Key Settings Group -->
+                <div id="chromakey-settings-group">
+                  <div class="input-grid">
+                    <div class="input-field">
+                      <label for="bg-color">Target Color</label>
+                      <div style="display: flex; flex-direction: column; gap: 6px;">
+                        <div style="display: flex; gap: 6px;">
+                          <input type="color" id="bg-color" value="#00ff00" style="padding: 0; width: 38px; height: 28px; border: 1px solid var(--border-color); cursor: pointer; border-radius: 4px; background: transparent;">
+                          <button id="btn-pick-color" class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px; flex: 1;" title="Sample a color from the main canvas">
+                            Sample
+                          </button>
+                          <button id="btn-auto-detect-bg" class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px; flex: 1.2;" title="Auto-detect background color from corners">
+                            Auto Detect
+                          </button>
+                        </div>
+                        <!-- Swatches -->
+                        <div class="color-swatches" style="display: flex; gap: 6px; margin-top: 2px;">
+                          <span class="swatch" data-color="#00ff00" style="width: 16px; height: 16px; border-radius: 4px; background: #00ff00; border: 1px solid rgba(255,255,255,0.2); cursor: pointer;" title="Green Screen"></span>
+                          <span class="swatch" data-color="#0000ff" style="width: 16px; height: 16px; border-radius: 4px; background: #0000ff; border: 1px solid rgba(255,255,255,0.2); cursor: pointer;" title="Blue Screen"></span>
+                          <span class="swatch" data-color="#ff00ff" style="width: 16px; height: 16px; border-radius: 4px; background: #ff00ff; border: 1px solid rgba(255,255,255,0.2); cursor: pointer;" title="Magenta Screen"></span>
+                          <span class="swatch" data-color="#ffffff" style="width: 16px; height: 16px; border-radius: 4px; background: #ffffff; border: 1px solid rgba(255,255,255,0.2); cursor: pointer;" title="White"></span>
+                          <span class="swatch" data-color="#000000" style="width: 16px; height: 16px; border-radius: 4px; background: #000000; border: 1px solid rgba(255,255,255,0.2); cursor: pointer;" title="Black"></span>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="input-field">
+                      <label for="bg-tolerance" id="label-bg-tolerance">Tolerance (15)</label>
+                      <input type="range" id="bg-tolerance" min="0" max="100" value="15" style="accent-color: var(--primary); width: 100%; height: 28px; background: transparent; cursor: pointer;">
+                    </div>
+                  </div>
+                  <div style="margin-top: 8px;">
+                    <label class="checkbox-container">
+                      <input type="checkbox" id="opt-bg-contiguous" checked>
+                      <span class="checkmark"></span>
+                      Contiguous Area Only (인접 영역만 제거)
+                    </label>
+                  </div>
+                </div>
 
-          <div class="action-buttons-container">
-            <button id="btn-apply-all" class="btn btn-secondary w-full" title="Apply current settings to all uploaded images">
-              Apply to All Files
-            </button>
-          </div>
-        </section>
+                <!-- AI Settings Group -->
+                <div id="ai-settings-group" class="hidden" style="margin-top: 6px;">
+                  <div class="input-field">
+                    <label for="opt-bg-removal-model-size">AI Model Quality</label>
+                    <select id="opt-bg-removal-model-size" style="width: 100%;">
+                      <option value="medium">Medium (Better, ~38MB)</option>
+                      <option value="small">Small (Faster, ~17MB)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Common Export Settings -->
+            <div class="control-group spacer-top">
+              <label class="control-label">Export Filters</label>
+              <label class="checkbox-container">
+                <input type="checkbox" id="opt-skip-empty" checked>
+                <span class="checkmark"></span>
+                Skip empty transparent slices
+              </label>
+            </div>
+
+            <div class="control-group">
+              <label for="opt-naming" class="control-label">File Naming Template</label>
+              <input type="text" id="opt-naming" value="sprite_{row}_{col}" placeholder="sprite_{row}_{col}">
+              <div class="naming-help">Placeholders: <code>{row}</code>, <code>{col}</code>, <code>{index}</code></div>
+            </div>
+
+            <div class="action-buttons-container">
+              <button id="btn-apply-all" class="btn btn-secondary w-full" title="Apply current settings to all uploaded images">
+                Apply to All Files
+              </button>
+            </div>
+          </section>
+        </div>
+
+        <!-- Video Mode Sidebar Content -->
+        <div id="video-sidebar-content" class="hidden" style="display: flex; flex-direction: column; height: 100%; width: 100%;">
+          <!-- Video Queue Section -->
+          <section class="panel-section" id="section-video-files" style="border-bottom: 1px solid var(--border-color); padding: 20px;">
+            <h2 class="section-title">
+              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" style="vertical-align:middle; margin-right:4px;"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect><line x1="7" y1="2" x2="7" y2="22"></line><line x1="17" y1="2" x2="17" y2="22"></line><line x1="2" y1="12" x2="22" y2="12"></line><line x1="2" y1="7" x2="7" y2="7"></line><line x1="2" y1="17" x2="7" y2="17"></line><line x1="17" y1="17" x2="22" y2="17"></line><line x1="17" y1="7" x2="22" y2="7"></line></svg>
+              Source Video
+            </h2>
+            
+            <div class="file-dropzone" id="video-dropzone">
+              <input type="file" id="video-file-input" accept="video/mp4, video/webm, video/ogg, video/quicktime" class="hidden-input">
+              <svg class="drop-icon" viewBox="0 0 24 24" width="32" height="32" stroke="currentColor" stroke-width="2" fill="none">
+                <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect>
+                <line x1="7" y1="2" x2="7" y2="22"></line>
+                <line x1="17" y1="2" x2="17" y2="22"></line>
+              </svg>
+              <div class="drop-text">
+                <strong>Drag & Drop Video</strong> or <span class="browse-link">Browse Video</span>
+              </div>
+              <div class="drop-subtext">MP4, WebM, OGG, MOV formats</div>
+            </div>
+
+            <div id="video-file-info-container" class="file-list-container hidden" style="margin-top: 10px; max-height: 120px;">
+              <ul class="file-list">
+                <li class="file-item active" style="cursor: default; border-left: 3px solid var(--accent); padding: 10px 14px;">
+                  <div class="file-info" style="margin-right: 0;">
+                    <span id="video-current-name" class="file-name" style="font-weight:600; color: var(--text-main);">video.mp4</span>
+                    <span id="video-current-meta" class="file-meta">1920x1080 • 12.0s</span>
+                  </div>
+                </li>
+              </ul>
+            </div>
+          </section>
+
+          <!-- Video Extraction Settings Section -->
+          <section class="panel-section" style="flex: 1; overflow-y: auto; padding: 20px;">
+            <h2 class="section-title">
+              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" style="vertical-align:middle; margin-right:4px;"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+              Extraction Config
+            </h2>
+
+            <div class="control-group">
+              <label for="video-interval-input" class="control-label" title="Extract one frame every N seconds">Interval (Seconds)</label>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <input type="number" id="video-interval-input" value="0.2" min="0.01" max="10" step="0.01" style="flex: 1;">
+                <label class="checkbox-container" style="margin: 0; white-space: nowrap; font-size: 11px;">
+                  <input type="checkbox" id="video-opt-all-frames">
+                  <span class="checkmark"></span>
+                  All Frames
+                </label>
+              </div>
+            </div>
+
+            <div class="control-group">
+              <label class="control-label">Range Settings (Seconds)</label>
+              <div class="input-grid">
+                <div class="input-field">
+                  <label for="video-range-start">Start Time</label>
+                  <input type="number" id="video-range-start" value="0.0" min="0" step="0.1">
+                </div>
+                <div class="input-field">
+                  <label for="video-range-end">End Time</label>
+                  <input type="number" id="video-range-end" value="0.0" min="0" step="0.1">
+                </div>
+              </div>
+            </div>
+            
+            <div class="control-group">
+              <label class="control-label">Range Selection</label>
+              <button id="btn-video-use-full" class="btn btn-secondary w-full" style="padding: 6px 12px; font-size: 11px;">
+                Use Entire Video Range
+              </button>
+            </div>
+
+            <!-- Video Background Removal Section -->
+            <div class="control-group spacer-top" style="border-top: 1px solid var(--border-color); padding-top: 16px;">
+              <label class="control-label">Background Removal</label>
+              <label class="checkbox-container">
+                <input type="checkbox" id="video-opt-bg-removal">
+                <span class="checkmark"></span>
+                Enable Background Removal
+              </label>
+              
+              <div id="video-bg-removal-settings" class="mode-settings-panel hidden" style="margin-top: 6px;">
+                <div class="input-field" style="margin-bottom: 8px;">
+                  <label for="video-opt-bg-removal-method">Method</label>
+                  <select id="video-opt-bg-removal-method" style="width: 100%;">
+                    <option value="chromakey">Chroma Key (색상 기반 제거)</option>
+                    <option value="ai">AI Smart Removal (로컬 AI 스마트 제거)</option>
+                  </select>
+                </div>
+
+                <!-- Video Chroma Key Settings Group -->
+                <div id="video-chromakey-settings-group">
+                  <div class="input-grid">
+                    <div class="input-field">
+                      <label for="video-bg-color">Target Color</label>
+                      <div style="display: flex; flex-direction: column; gap: 6px;">
+                        <div style="display: flex; gap: 6px;">
+                          <input type="color" id="video-bg-color" value="#00ff00" style="padding: 0; width: 38px; height: 28px; border: 1px solid var(--border-color); cursor: pointer; border-radius: 4px; background: transparent;">
+                          <button id="video-btn-pick-color" class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px; flex: 1;" title="Sample a color from the video frames">
+                            Sample
+                          </button>
+                          <button id="video-btn-auto-detect-bg" class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px; flex: 1.2;" title="Auto-detect background color from corners of frames">
+                            Auto Detect
+                          </button>
+                        </div>
+                        <!-- Swatches -->
+                        <div class="color-swatches" style="display: flex; gap: 6px; margin-top: 2px;">
+                          <span class="video-swatch" data-color="#00ff00" style="width: 16px; height: 16px; border-radius: 4px; background: #00ff00; border: 1px solid rgba(255,255,255,0.2); cursor: pointer;" title="Green Screen"></span>
+                          <span class="video-swatch" data-color="#0000ff" style="width: 16px; height: 16px; border-radius: 4px; background: #0000ff; border: 1px solid rgba(255,255,255,0.2); cursor: pointer;" title="Blue Screen"></span>
+                          <span class="video-swatch" data-color="#ff00ff" style="width: 16px; height: 16px; border-radius: 4px; background: #ff00ff; border: 1px solid rgba(255,255,255,0.2); cursor: pointer;" title="Magenta Screen"></span>
+                          <span class="video-swatch" data-color="#ffffff" style="width: 16px; height: 16px; border-radius: 4px; background: #ffffff; border: 1px solid rgba(255,255,255,0.2); cursor: pointer;" title="White"></span>
+                          <span class="video-swatch" data-color="#000000" style="width: 16px; height: 16px; border-radius: 4px; background: #000000; border: 1px solid rgba(255,255,255,0.2); cursor: pointer;" title="Black"></span>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="input-field">
+                      <label for="video-bg-tolerance" id="video-label-bg-tolerance">Tolerance (15)</label>
+                      <input type="range" id="video-bg-tolerance" min="0" max="100" value="15" style="accent-color: var(--primary); width: 100%; height: 28px; background: transparent; cursor: pointer;">
+                    </div>
+                  </div>
+                  <div style="margin-top: 8px;">
+                    <label class="checkbox-container">
+                      <input type="checkbox" id="video-opt-bg-contiguous" checked>
+                      <span class="checkmark"></span>
+                      Contiguous Area Only (인접 영역만 제거)
+                    </label>
+                  </div>
+                </div>
+
+                <!-- Video AI Settings Group -->
+                <div id="video-ai-settings-group" class="hidden" style="margin-top: 6px;">
+                  <div class="input-field">
+                    <label for="video-opt-bg-removal-model-size">AI Model Quality</label>
+                    <select id="video-opt-bg-removal-model-size" style="width: 100%;">
+                      <option value="medium">Medium (Better, ~38MB)</option>
+                      <option value="small">Small (Faster, ~17MB)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="action-buttons-container" style="margin-top: 16px; border-top: 1px solid var(--border-color); padding-top: 16px;">
+              <button id="btn-video-extract" class="btn btn-accent w-full" disabled style="padding: 12px 16px;">
+                <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.5" fill="none" style="vertical-align: middle; margin-right: 6px;"><path d="M23 4v6h-6M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                Extract Video Frames
+              </button>
+            </div>
+          </section>
+        </div>
       </aside>
 
       <!-- Center: Visualizer Canvas Viewport -->
-      <section class="canvas-panel">
-        <!-- Canvas Toolbar -->
-        <div class="canvas-toolbar">
-          <div class="image-info" id="image-info">No image loaded</div>
-          <div class="viewport-controls">
-            <button id="btn-zoom-out" class="btn-icon-sm" title="Zoom Out">
-              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-            </button>
-            <span class="zoom-level" id="zoom-level">100%</span>
-            <button id="btn-zoom-in" class="btn-icon-sm" title="Zoom In">
-              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-            </button>
-            <button id="btn-zoom-fit" class="btn-text-sm" title="Fit Screen">Fit</button>
-            <button id="btn-zoom-reset" class="btn-text-sm" title="100% Zoom">1:1</button>
-          </div>
-        </div>
-
-        <!-- Canvas Container -->
-        <div class="canvas-viewport" id="canvas-viewport">
-          <div class="canvas-container" id="canvas-container">
-            <!-- Loading overlay -->
-            <div class="loading-overlay hidden" id="loading-overlay">
-              <div class="spinner"></div>
-              <span>Detecting Sprites...</span>
+      <section class="canvas-panel" style="position: relative; overflow: hidden; display: flex; flex-direction: column; height: 100%;">
+        
+        <!-- Slicer Viewport Content -->
+        <div id="slicer-viewport-content" style="display: flex; flex-direction: column; height: 100%; width: 100%;">
+          <!-- Canvas Toolbar -->
+          <div class="canvas-toolbar">
+            <div class="image-info" id="image-info">No image loaded</div>
+            <div class="viewport-controls">
+              <button id="btn-zoom-out" class="btn-icon-sm" title="Zoom Out">
+                <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+              </button>
+              <span class="zoom-level" id="zoom-level">100%</span>
+              <button id="btn-zoom-in" class="btn-icon-sm" title="Zoom In">
+                <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+              </button>
+              <button id="btn-zoom-fit" class="btn-text-sm" title="Fit Screen">Fit</button>
+              <button id="btn-zoom-reset" class="btn-text-sm" title="100% Zoom">1:1</button>
             </div>
-            <!-- Canvas -->
-            <canvas id="slicer-canvas"></canvas>
+          </div>
+
+          <!-- Canvas Container -->
+          <div class="canvas-viewport" id="canvas-viewport" style="flex: 1;">
+            <div class="canvas-container" id="canvas-container">
+              <!-- Loading overlay -->
+              <div class="loading-overlay hidden" id="loading-overlay">
+                <div class="spinner"></div>
+                <span id="loading-text">Detecting Sprites...</span>
+              </div>
+              <!-- Canvas -->
+              <canvas id="slicer-canvas"></canvas>
+            </div>
+          </div>
+
+          <!-- Help instructions -->
+          <div class="canvas-footer-tip">
+            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" class="tip-icon"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            Drag to PAN. Scroll wheel to ZOOM. Left-click a box to TOGGLE export on individual frames.
           </div>
         </div>
 
-        <!-- Help instructions -->
-        <div class="canvas-footer-tip">
-          <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" class="tip-icon"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-          Drag to PAN. Scroll wheel to ZOOM. Left-click a box to TOGGLE export on individual frames.
+        <!-- Video Viewport Content -->
+        <div id="video-viewport-content" class="hidden" style="display: flex; flex-direction: column; height: 100%; width: 100%; position: relative;">
+          <!-- Video Loading Overlay -->
+          <div class="loading-overlay hidden" id="video-loading-overlay">
+            <div class="spinner"></div>
+            <span id="video-loading-text">Extracting Video Frames...</span>
+          </div>
+
+          <!-- Video Toolbar -->
+          <div class="canvas-toolbar">
+            <div class="image-info" id="video-toolbar-info">No video loaded</div>
+            <div class="viewport-controls">
+              <!-- Video Time Display -->
+              <span id="video-time-display" class="zoom-level" style="min-width: 90px;">00:00 / 00:00</span>
+            </div>
+          </div>
+
+          <!-- Video Preview Player Container -->
+          <div id="video-player-container" style="display: none; align-items: center; justify-content: center; background: #0c0d12; padding: 16px; border-bottom: 1px solid var(--border-color); position: relative;">
+            <video id="ws-video-player" style="max-width: 100%; max-height: 200px; border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,0.5);" controls muted playsinline></video>
+          </div>
+
+          <!-- Video Frames Grid Screen -->
+          <div class="canvas-viewport" style="flex: 1; padding: 20px; overflow-y: auto; display: block; background-color: #12131a; background-image: linear-gradient(45deg, #181922 25%, transparent 25%), linear-gradient(-45deg, #181922 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #181922 75%), linear-gradient(-45deg, transparent 75%, #181922 75%); background-size: 24px 24px; background-position: 0 0, 0 12px, 12px -12px, -12px 0px;">
+            <div id="video-frames-grid" class="preview-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); gap: 12px; width: 100%;">
+              <!-- Loaded frame cards will go here -->
+              <div id="video-grid-placeholder" class="no-sprites-msg" style="grid-column: 1 / -1; padding: 80px 20px; border: 1px dashed var(--border-color); border-radius: 8px; text-align: center; width: 100%;">
+                No video frames loaded. Select a video, set range/interval in the sidebar, and click "Extract Video Frames".
+              </div>
+            </div>
+          </div>
+
+          <!-- Video Control Tip -->
+          <div class="canvas-footer-tip">
+            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" class="tip-icon" style="color: var(--accent);"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            Click a frame to toggle selection. Background removal and animation export apply in real-time.
+          </div>
         </div>
       </section>
 
-      <!-- Right/Bottom Panel: Sprite Slices Preview -->
+      <!-- Right/Bottom Panel: Sprite Slices Preview / Animation Playback -->
       <aside class="preview-panel">
-        <div class="preview-header">
-          <h2 class="section-title">
-            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><rect x="3" y="3" width="7" height="9"></rect><rect x="14" y="3" width="7" height="5"></rect><rect x="14" y="12" width="7" height="9"></rect><rect x="3" y="16" width="7" height="5"></rect></svg>
-            Sliced Frames Preview (<span id="preview-count">0</span>)
-          </h2>
-          <div class="preview-actions">
-            <button id="btn-toggle-all-slices" class="btn-text-sm">Select None</button>
+        <!-- Panel Tabs -->
+        <div class="preview-tabs" style="display: flex; border-bottom: 1px solid var(--border-color); background: var(--bg-surface-solid);">
+          <button id="tab-slices" class="tab-btn active" style="flex: 1; padding: 12px; background: transparent; border: none; border-bottom: 2px solid var(--primary); color: var(--text-main); font-weight: 600; font-size: 12px; cursor: pointer; text-align: center;">Slices List</button>
+          <button id="tab-animation" class="tab-btn" style="flex: 1; padding: 12px; background: transparent; border: none; border-bottom: 2px solid transparent; color: var(--text-muted); font-weight: 500; font-size: 12px; cursor: pointer; text-align: center;">Animation Preview</button>
+        </div>
+
+        <!-- Slices List View -->
+        <div id="view-slices" class="preview-view-container" style="display: flex; flex-direction: column; flex: 1; min-height: 0;">
+          <div class="preview-header" style="height: 40px; padding: 0 16px; border-bottom: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between; background: var(--bg-surface);">
+            <h2 class="section-title" style="font-size: 12px;">
+              <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" style="vertical-align: middle; margin-right: 4px;"><rect x="3" y="3" width="7" height="9"></rect><rect x="14" y="3" width="7" height="5"></rect><rect x="14" y="12" width="7" height="9"></rect><rect x="3" y="16" width="7" height="5"></rect></svg>
+              Sliced Frames Preview (<span id="preview-count">0</span>)
+            </h2>
+            <div class="preview-actions">
+              <button id="btn-toggle-all-slices" class="btn-text-sm">Select None</button>
+            </div>
+          </div>
+
+          <div class="preview-grid-wrapper" style="flex: 1;">
+            <div class="preview-grid" id="preview-grid">
+              <!-- Dynamically populated thumbnails -->
+              <div class="no-sprites-msg">No sprites generated yet. Load an image and adjust slicing configuration.</div>
+            </div>
           </div>
         </div>
 
-        <div class="preview-grid-wrapper">
-          <div class="preview-grid" id="preview-grid">
-            <!-- Dynamically populated thumbnails -->
-            <div class="no-sprites-msg">No sprites generated yet. Load an image and adjust slicing configuration.</div>
+        <!-- Animation Preview View -->
+        <div id="view-animation" class="preview-view-container hidden" style="flex-direction: column; flex: 1; min-height: 0; padding: 16px; gap: 16px; background: rgba(0,0,0,0.08); overflow-y: auto;">
+          <!-- Player Canvas Screen -->
+          <div class="animation-screen-container" style="flex: 1; min-height: 180px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--border-color); border-radius: 10px; overflow: hidden; position: relative; background: #12131a; background-image: linear-gradient(45deg, #181922 25%, transparent 25%), linear-gradient(-45deg, #181922 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #181922 75%), linear-gradient(-45deg, transparent 75%, #181922 75%); background-size: 16px 16px; background-position: 0 0, 0 8px, 8px -8px, -8px 0px;">
+            <canvas id="anim-canvas" style="display: none; max-width: 90%; max-height: 90%; image-rendering: pixelated; object-fit: contain;"></canvas>
+            <div id="anim-no-frames-msg" class="no-sprites-msg" style="border: none; background: transparent; padding: 0;">No active frames selected for animation.</div>
+          </div>
+
+          <!-- Playback Controls -->
+          <div class="playback-controls" style="display: flex; flex-direction: column; gap: 12px; background: var(--bg-surface-solid); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px;">
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+              <button id="btn-anim-play" class="btn btn-secondary" style="padding: 6px 12px; font-size: 11px;">Play</button>
+              <div style="font-size: 11px; color: var(--text-muted);">
+                Frame: <span id="anim-frame-idx">0</span> / <span id="anim-frame-total">0</span>
+              </div>
+            </div>
+            
+            <div class="input-field" style="gap: 2px;">
+              <label for="anim-fps" id="label-anim-fps" style="font-size: 11px; color: var(--text-muted); display: flex; justify-content: space-between; margin-bottom: 4px;">
+                <span>Playback Speed</span>
+                <strong>10 FPS</strong>
+              </label>
+              <input type="range" id="anim-fps" min="1" max="30" value="10" style="accent-color: var(--primary); width: 100%; cursor: pointer;">
+            </div>
+          </div>
+
+          <!-- Export Animation Options -->
+          <div class="anim-export-panel" style="display: flex; flex-direction: column; gap: 8px; flex-shrink: 0;">
+            <button id="btn-export-gif" class="btn btn-primary w-full" disabled>
+              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" style="vertical-align:middle; margin-right:6px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              Export Animation (GIF)
+            </button>
+            <button id="btn-export-webm" class="btn btn-accent w-full" disabled>
+              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" style="vertical-align:middle; margin-right:6px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              Export Animation (WebM)
+            </button>
           </div>
         </div>
 

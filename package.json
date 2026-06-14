@@ -12,6 +12,9 @@
     "vite": "^5.2.11"
   },
   "dependencies": {
+    "@imgly/background-removal": "^1.7.0",
+    "coi-serviceworker": "^0.1.7",
+    "gifshot": "^0.4.5",
     "jszip": "^3.10.1"
   }
 }

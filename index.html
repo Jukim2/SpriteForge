@@ -241,12 +241,18 @@
                   Rematch (Normalize Size)
                   <span class="help-icon">?
                     <span class="tooltip-text">
-                      Forces all exported sprites to have the exact same dimensions. Useful for game engines.
-                      <ul>
-                        <li><b>Auto (Largest Cell):</b> Matches the largest sliced cell.</li>
-                        <li><b>Contain:</b> Pads smaller sprites with transparency.</li>
-                        <li><b>Cover:</b> Crops edges if too large.</li>
-                        <li><b>Stretch:</b> Ignores aspect ratio.</li>
+                      <strong style="font-size: 13px; color: #60a5fa;">What is Rematch?</strong><br>
+                      It makes all exported sprites the <b>exact same size</b>, which is required by game engines like Unity or Unreal for sprite animations.<br><br>
+                      <strong style="color: #9ca3af;">Size Mode:</strong>
+                      <ul style="margin-top: 4px; margin-bottom: 8px;">
+                        <li><b>Auto (Largest Cell):</b> Finds the biggest sprite you sliced, and makes every other sprite that same size.</li>
+                        <li><b>Custom Size:</b> You manually set the exact Width/Height for all sprites.</li>
+                      </ul>
+                      <strong style="color: #9ca3af;">Fit Mode:</strong>
+                      <ul style="margin-top: 4px; margin-bottom: 0;">
+                        <li><b>Contain:</b> Places the sprite in the center and adds transparent padding around it so it isn't stretched.</li>
+                        <li><b>Cover:</b> Crops the outer edges of the sprite if it is larger than the target size.</li>
+                        <li><b>Stretch:</b> Forcibly resizes the sprite to fill the target size, which may stretch/squash it.</li>
                       </ul>
                     </span>
                   </span>

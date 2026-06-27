@@ -102,6 +102,7 @@ const els = {
   customCols: document.getElementById('custom-cols'),
   customRows: document.getElementById('custom-rows'),
   btnResetEqual: document.getElementById('btn-reset-equal'),
+  btnAutoSnap: document.getElementById('btn-auto-snap'),
   
   // Rematch UI elements
   optRematch: document.getElementById('opt-rematch'),
@@ -339,6 +340,7 @@ function bindEvents() {
     syncSettingsFromUI();
     reSliceActiveFile();
   });
+  els.btnAutoSnap.addEventListener('click', autoSnapDividers);
   
   // Rematch event bindings
   els.optRematch.addEventListener('change', (e) => {
@@ -2194,6 +2196,93 @@ function generateEqualDividers() {
 
   state.activeSettings.customColLines = colLines;
   state.activeSettings.customRowLines = rowLines;
+}
+
+/** Auto-detect empty spaces in region and place dividers */
+function autoSnapDividers() {
+  const region = state.activeSettings.customRegion;
+  if (!region || region.width <= 0 || region.height <= 0) return;
+  const activeFile = getActiveFile();
+  if (!activeFile) return;
+
+  const rw = Math.round(region.width);
+  const rh = Math.round(region.height);
+  const rx = Math.round(region.x);
+  const ry = Math.round(region.y);
+
+  if (rw <= 0 || rh <= 0) return;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = rw;
+  canvas.height = rh;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(activeFile.imgElement, rx, ry, rw, rh, 0, 0, rw, rh);
+
+  const imgData = ctx.getImageData(0, 0, rw, rh);
+  const data = imgData.data;
+  const alphaThreshold = state.activeSettings.autoTolerance !== undefined ? state.activeSettings.autoTolerance : 5;
+
+  const emptyCols = new Uint8Array(rw);
+  for (let x = 0; x < rw; x++) {
+    let empty = 1;
+    for (let y = 0; y < rh; y++) {
+      if (data[(y * rw + x) * 4 + 3] >= alphaThreshold) {
+        empty = 0;
+        break;
+      }
+    }
+    emptyCols[x] = empty;
+  }
+
+  const emptyRows = new Uint8Array(rh);
+  for (let y = 0; y < rh; y++) {
+    let empty = 1;
+    for (let x = 0; x < rw; x++) {
+      if (data[(y * rw + x) * 4 + 3] >= alphaThreshold) {
+        empty = 0;
+        break;
+      }
+    }
+    emptyRows[y] = empty;
+  }
+
+  function getGapCenters(emptyArr, length) {
+    const centers = [];
+    let inGap = false;
+    let start = 0;
+    for (let i = 0; i < length; i++) {
+      if (emptyArr[i]) {
+        if (!inGap) {
+          inGap = true;
+          start = i;
+        }
+      } else {
+        if (inGap) {
+          if (start > 0) {
+            centers.push(start + (i - start) / 2);
+          }
+          inGap = false;
+        }
+      }
+    }
+    return centers;
+  }
+
+  const colLines = getGapCenters(emptyCols, rw).map(cx => region.x + cx);
+  const rowLines = getGapCenters(emptyRows, rh).map(cy => region.y + cy);
+
+  state.activeSettings.customColLines = colLines;
+  state.activeSettings.customRowLines = rowLines;
+  
+  const newCols = Math.max(1, colLines.length + 1);
+  const newRows = Math.max(1, rowLines.length + 1);
+  state.activeSettings.customCols = newCols;
+  state.activeSettings.customRows = newRows;
+  els.customCols.value = newCols;
+  els.customRows.value = newRows;
+
+  syncSettingsFromUI();
+  reSliceActiveFile();
 }
 
 /** Toggle region selection mode */

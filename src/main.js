@@ -2511,15 +2511,23 @@ function handleCustomGridMouseMove(e, coords) {
       if (newY + newH > imgH) newH = imgH - newY;
       if (newW < 10) newW = 10;
       if (newH < 10) newH = 10;
+      
+      // Proportionally scale inner divider lines
+      const scaleX = newW / region.width;
+      const scaleY = newH / region.height;
+
+      if (state.activeSettings.customColLines) {
+        state.activeSettings.customColLines = state.activeSettings.customColLines.map(x => newX + (x - region.x) * scaleX);
+      }
+      if (state.activeSettings.customRowLines) {
+        state.activeSettings.customRowLines = state.activeSettings.customRowLines.map(y => newY + (y - region.y) * scaleY);
+      }
     }
 
     state.activeSettings.customRegion = { x: newX, y: newY, width: newW, height: newH };
     state.customGrid.regionDragOffset = { x: coords.x, y: coords.y };
     
     syncCustomRegionToUI();
-    if (mode !== 'move') {
-      generateEqualDividers();
-    }
     syncSettingsFromUI();
     sliceFile(getActiveFile());
     drawCanvas();

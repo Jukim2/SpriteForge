@@ -33,8 +33,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <!-- CSS -->
-  <script type="module" crossorigin src="./assets/index-b6WaFWRE.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-CVZ2_cbb.css">
+  <script type="module" crossorigin src="./assets/index-BvWcdX0n.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-BNjmWN5W.css">
 </head>
 <body class="dark-theme">
   <!-- Background Ambient Glows -->
@@ -238,7 +238,20 @@
 
               <!-- Rematch Settings -->
               <div class="custom-grid-section" style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 10px;">
-                <label class="control-label" style="margin-bottom: 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.7;">Rematch (Normalize Size)</label>
+                <label class="control-label" style="margin-bottom: 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.7; display: flex; align-items: center;">
+                  Rematch (Normalize Size)
+                  <span class="help-icon">?
+                    <span class="tooltip-text">
+                      Forces all exported sprites to have the exact same dimensions. Useful for game engines.
+                      <ul>
+                        <li><b>Auto (Largest Cell):</b> Matches the largest sliced cell.</li>
+                        <li><b>Contain:</b> Pads smaller sprites with transparency.</li>
+                        <li><b>Cover:</b> Crops edges if too large.</li>
+                        <li><b>Stretch:</b> Ignores aspect ratio.</li>
+                      </ul>
+                    </span>
+                  </span>
+                </label>
                 <label class="checkbox-container">
                   <input type="checkbox" id="opt-rematch">
                   <span class="checkmark"></span>

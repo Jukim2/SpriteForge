@@ -2200,12 +2200,43 @@ function generateEqualDividers() {
   state.activeSettings.customRowLines = rowLines;
 }
 
+function autoDetectRegionBounds(activeFile) {
+  const canvas = document.createElement('canvas');
+  const w = activeFile.imgElement.naturalWidth;
+  const h = activeFile.imgElement.naturalHeight;
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(activeFile.imgElement, 0, 0);
+  const imgData = ctx.getImageData(0, 0, w, h);
+  const data = imgData.data;
+  const alphaThreshold = state.activeSettings.autoTolerance !== undefined ? state.activeSettings.autoTolerance : 5;
+  let minX = w, minY = h, maxX = -1, maxY = -1;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (data[(y * w + x) * 4 + 3] >= alphaThreshold) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < 0) return { x: 0, y: 0, width: w, height: h };
+  return { x: minX, y: minY, width: (maxX - minX + 1), height: (maxY - minY + 1) };
+}
+
 /** Auto-detect empty spaces in region and place dividers */
 function autoSnapDividers() {
-  const region = state.activeSettings.customRegion;
-  if (!region || region.width <= 0 || region.height <= 0) return;
+  let region = state.activeSettings.customRegion;
   const activeFile = getActiveFile();
   if (!activeFile) return;
+
+  if (!region || region.width <= 0 || region.height <= 0) {
+    region = autoDetectRegionBounds(activeFile);
+    state.activeSettings.customRegion = region;
+    syncCustomRegionToUI();
+  }
 
   const rw = Math.round(region.width);
   const rh = Math.round(region.height);
@@ -2307,10 +2338,15 @@ function autoSnapDividers() {
 
 /** Snap dividers to closest empty spaces while keeping current grid count */
 function autoSnapDividersKeep() {
-  const region = state.activeSettings.customRegion;
-  if (!region || region.width <= 0 || region.height <= 0) return;
+  let region = state.activeSettings.customRegion;
   const activeFile = getActiveFile();
   if (!activeFile) return;
+
+  if (!region || region.width <= 0 || region.height <= 0) {
+    region = autoDetectRegionBounds(activeFile);
+    state.activeSettings.customRegion = region;
+    syncCustomRegionToUI();
+  }
 
   const cols = state.activeSettings.customCols || parseInt(els.customCols.value) || 3;
   const rows = state.activeSettings.customRows || parseInt(els.customRows.value) || 3;

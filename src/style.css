@@ -1436,8 +1436,8 @@ body.light-theme .video-frame-card {
   position: absolute;
   z-index: 9999;
   bottom: 150%;
-  left: 0;
-  margin-left: -10px;
+  left: 50%;
+  transform: translateX(-50%);
   opacity: 0;
   transition: opacity 0.2s;
   font-weight: normal;
@@ -1451,8 +1451,9 @@ body.light-theme .video-frame-card {
   content: "";
   position: absolute;
   top: 100%;
-  left: 17px;
-  margin-left: -5px;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-left: 0;
   border-width: 5px;
   border-style: solid;
   border-color: #1e2124 transparent transparent transparent;

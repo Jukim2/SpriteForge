@@ -1,6 +1,6 @@
 import JSZip from 'jszip';
 import gifshot from 'gifshot';
-import { sliceGrid, sliceAuto, isRegionEmpty, detectGridSize } from './slicer.js';
+import { sliceGrid, sliceAuto, sliceCustomGrid, isRegionEmpty, detectGridSize } from './slicer.js';
 
 // Application State
 const state = {
@@ -27,7 +27,19 @@ const state = {
     bgRemovalModelSize: 'medium', // 'small' or 'medium'
     bgColor: '#00ff00',
     bgTolerance: 15,
-    bgContiguous: true
+    bgContiguous: true,
+    // Custom Grid settings
+    customRegion: null,    // { x, y, width, height }
+    customCols: 3,
+    customRows: 3,
+    customColLines: [],    // x-coords of vertical dividers
+    customRowLines: [],    // y-coords of horizontal dividers
+    // Rematch settings
+    rematchEnabled: false,
+    rematchMode: 'largest', // 'largest' | 'custom'
+    rematchWidth: 64,
+    rematchHeight: 64,
+    rematchFit: 'contain'  // 'contain' | 'cover' | 'stretch'
   },
   anim: {
     isPlaying: false,
@@ -37,6 +49,19 @@ const state = {
     activeTab: 'slices'
   },
   workspaceMode: 'slicer',
+  // Custom Grid interaction state
+  customGrid: {
+    isSelectingRegion: false,
+    regionDragStart: null,      // { x, y } canvas coords where drag started
+    regionDragCurrent: null,    // { x, y } current drag position
+    isDraggingGuideline: false,
+    dragGuidelineType: null,    // 'col' or 'row'
+    dragGuidelineIndex: null,   // index in colLines/rowLines
+    hoveredGuideline: null,     // { type: 'col'|'row', index }
+    isDraggingRegion: false,
+    regionDragMode: null,       // 'move' | 'n' | 's' | 'e' | 'w' | 'nw' | 'ne' | 'sw' | 'se'
+    regionDragOffset: null      // { x, y }
+  },
   video: {
     file: null,
     url: null,
@@ -62,8 +87,30 @@ const els = {
   
   modeGrid: document.getElementById('mode-grid'),
   modeAuto: document.getElementById('mode-auto'),
+  modeCustom: document.getElementById('mode-custom'),
   settingsGrid: document.getElementById('settings-grid'),
   settingsAuto: document.getElementById('settings-auto'),
+  settingsCustom: document.getElementById('settings-custom'),
+  
+  // Custom Grid UI elements
+  btnSelectRegion: document.getElementById('btn-select-region'),
+  customRegionX: document.getElementById('custom-region-x'),
+  customRegionY: document.getElementById('custom-region-y'),
+  customRegionW: document.getElementById('custom-region-w'),
+  customRegionH: document.getElementById('custom-region-h'),
+  btnRegionFull: document.getElementById('btn-region-full'),
+  customCols: document.getElementById('custom-cols'),
+  customRows: document.getElementById('custom-rows'),
+  btnResetEqual: document.getElementById('btn-reset-equal'),
+  
+  // Rematch UI elements
+  optRematch: document.getElementById('opt-rematch'),
+  rematchSettings: document.getElementById('rematch-settings'),
+  rematchMode: document.getElementById('rematch-mode'),
+  rematchCustomSize: document.getElementById('rematch-custom-size'),
+  rematchW: document.getElementById('rematch-w'),
+  rematchH: document.getElementById('rematch-h'),
+  rematchFit: document.getElementById('rematch-fit'),
   
   gridW: document.getElementById('grid-w'),
   gridH: document.getElementById('grid-h'),
@@ -235,6 +282,7 @@ function bindEvents() {
   // Mode Select Buttons
   els.modeGrid.addEventListener('click', () => switchMode('grid'));
   els.modeAuto.addEventListener('click', () => switchMode('auto'));
+  els.modeCustom.addEventListener('click', () => switchMode('custom'));
 
   // Debounce helper to prevent heavy calculations on every keystroke
   function debounce(func, wait) {
@@ -259,6 +307,63 @@ function bindEvents() {
   textInputs.forEach(input => {
     input.addEventListener('input', debouncedReSlice);
   });
+
+  // Custom Grid event bindings
+  els.btnSelectRegion.addEventListener('click', toggleRegionSelectMode);
+  
+  const debouncedCustomRegionUpdate = debounce(() => {
+    syncCustomRegionFromUI();
+    generateEqualDividers();
+    syncSettingsFromUI();
+    reSliceActiveFile();
+  }, 350);
+  
+  [els.customRegionX, els.customRegionY, els.customRegionW, els.customRegionH].forEach(input => {
+    input.addEventListener('input', debouncedCustomRegionUpdate);
+  });
+  
+  const debouncedCustomGridUpdate = debounce(() => {
+    syncSettingsFromUI();
+    generateEqualDividers();
+    syncSettingsFromUI();
+    reSliceActiveFile();
+  }, 350);
+  
+  [els.customCols, els.customRows].forEach(input => {
+    input.addEventListener('input', debouncedCustomGridUpdate);
+  });
+  
+  els.btnRegionFull.addEventListener('click', setRegionToFullImage);
+  els.btnResetEqual.addEventListener('click', () => {
+    generateEqualDividers();
+    syncSettingsFromUI();
+    reSliceActiveFile();
+  });
+  
+  // Rematch event bindings
+  els.optRematch.addEventListener('change', (e) => {
+    if (e.target.checked) {
+      els.rematchSettings.classList.remove('hidden');
+    } else {
+      els.rematchSettings.classList.add('hidden');
+    }
+    syncSettingsFromUI();
+  });
+  
+  els.rematchMode.addEventListener('change', (e) => {
+    if (e.target.value === 'custom') {
+      els.rematchCustomSize.classList.remove('hidden');
+    } else {
+      els.rematchCustomSize.classList.add('hidden');
+    }
+    syncSettingsFromUI();
+  });
+  
+  [els.rematchW, els.rematchH].forEach(input => {
+    input.addEventListener('input', () => syncSettingsFromUI());
+  });
+  
+  els.rematchFit.addEventListener('change', () => syncSettingsFromUI());
 
   els.optSkipEmpty.addEventListener('change', () => {
     syncSettingsFromUI();
@@ -554,10 +659,28 @@ function syncSettingsFromUI() {
   state.activeSettings.bgTolerance = parseInt(els.bgTolerance.value) || 15;
   state.activeSettings.bgContiguous = els.optBgContiguous.checked;
 
+  // Custom Grid settings
+  state.activeSettings.customCols = Math.max(1, Math.min(50, parseInt(els.customCols.value) || 3));
+  state.activeSettings.customRows = Math.max(1, Math.min(50, parseInt(els.customRows.value) || 3));
+  // customRegion, customColLines, customRowLines are synced directly via interaction handlers
+
+  // Rematch settings
+  state.activeSettings.rematchEnabled = els.optRematch.checked;
+  state.activeSettings.rematchMode = els.rematchMode.value;
+  state.activeSettings.rematchWidth = Math.max(1, parseInt(els.rematchW.value) || 64);
+  state.activeSettings.rematchHeight = Math.max(1, parseInt(els.rematchH.value) || 64);
+  state.activeSettings.rematchFit = els.rematchFit.value;
+
   // Update current active file settings copy
   const activeFile = getActiveFile();
   if (activeFile) {
     activeFile.settings = { ...state.activeSettings };
+    // Preserve array/object references for custom grid
+    if (state.activeSettings.customRegion) {
+      activeFile.settings.customRegion = { ...state.activeSettings.customRegion };
+    }
+    activeFile.settings.customColLines = [...state.activeSettings.customColLines];
+    activeFile.settings.customRowLines = [...state.activeSettings.customRowLines];
   }
 }
 
@@ -1104,7 +1227,7 @@ async function applyVideoBgRemoval() {
           
           const blob = await imglyRemoveBackground(canvasBlob, {
             model: modelSize,
-            publicPath: `${window.location.origin}/resources/`,
+            publicPath: new URL('resources/', window.location.href).href,
             progress: (key, current, total) => {
               const pct = Math.round((current / total) * 100);
               if (loadingText) {
@@ -1440,16 +1563,30 @@ function renderVideoFramesGrid() {
 
 function switchMode(mode) {
   state.activeSettings.mode = mode;
+  
+  // Reset all mode buttons and panels
+  els.modeGrid.classList.remove('active');
+  els.modeAuto.classList.remove('active');
+  els.modeCustom.classList.remove('active');
+  els.settingsGrid.classList.add('hidden');
+  els.settingsAuto.classList.add('hidden');
+  els.settingsCustom.classList.add('hidden');
+  
   if (mode === 'grid') {
     els.modeGrid.classList.add('active');
-    els.modeAuto.classList.remove('active');
     els.settingsGrid.classList.remove('hidden');
-    els.settingsAuto.classList.add('hidden');
-  } else {
-    els.modeGrid.classList.remove('active');
+  } else if (mode === 'auto') {
     els.modeAuto.classList.add('active');
-    els.settingsGrid.classList.add('hidden');
     els.settingsAuto.classList.remove('hidden');
+  } else if (mode === 'custom') {
+    els.modeCustom.classList.add('active');
+    els.settingsCustom.classList.remove('hidden');
+    // Exit region selecting mode if active
+    exitRegionSelectMode();
+    // If no region is set yet, auto-set to full image
+    if (!state.activeSettings.customRegion) {
+      setRegionToFullImage();
+    }
   }
 
   // Sync to active file settings copy
@@ -1480,6 +1617,39 @@ function updateSettingsUI(settings) {
   els.labelBgTolerance.textContent = `Tolerance (${settings.bgTolerance || 15})`;
   els.optBgContiguous.checked = settings.bgContiguous !== false;
 
+  // Custom Grid UI
+  els.customCols.value = settings.customCols || 3;
+  els.customRows.value = settings.customRows || 3;
+  if (settings.customRegion) {
+    els.customRegionX.value = Math.round(settings.customRegion.x);
+    els.customRegionY.value = Math.round(settings.customRegion.y);
+    els.customRegionW.value = Math.round(settings.customRegion.width);
+    els.customRegionH.value = Math.round(settings.customRegion.height);
+  } else {
+    els.customRegionX.value = 0;
+    els.customRegionY.value = 0;
+    els.customRegionW.value = 0;
+    els.customRegionH.value = 0;
+  }
+
+  // Rematch UI
+  els.optRematch.checked = settings.rematchEnabled || false;
+  els.rematchMode.value = settings.rematchMode || 'largest';
+  els.rematchW.value = settings.rematchWidth || 64;
+  els.rematchH.value = settings.rematchHeight || 64;
+  els.rematchFit.value = settings.rematchFit || 'contain';
+  
+  if (settings.rematchEnabled) {
+    els.rematchSettings.classList.remove('hidden');
+  } else {
+    els.rematchSettings.classList.add('hidden');
+  }
+  if (settings.rematchMode === 'custom') {
+    els.rematchCustomSize.classList.remove('hidden');
+  } else {
+    els.rematchCustomSize.classList.add('hidden');
+  }
+
   if (settings.enableBgRemoval || false) {
     els.bgRemovalSettings.classList.remove('hidden');
   } else {
@@ -1488,17 +1658,30 @@ function updateSettingsUI(settings) {
   toggleBgRemovalSettingsUI();
 
   state.activeSettings = { ...settings };
+  // Restore array/object references
+  if (settings.customRegion) {
+    state.activeSettings.customRegion = { ...settings.customRegion };
+  }
+  state.activeSettings.customColLines = [...(settings.customColLines || [])];
+  state.activeSettings.customRowLines = [...(settings.customRowLines || [])];
+
+  // Reset all mode buttons and panels
+  els.modeGrid.classList.remove('active');
+  els.modeAuto.classList.remove('active');
+  els.modeCustom.classList.remove('active');
+  els.settingsGrid.classList.add('hidden');
+  els.settingsAuto.classList.add('hidden');
+  els.settingsCustom.classList.add('hidden');
 
   if (settings.mode === 'grid') {
     els.modeGrid.classList.add('active');
-    els.modeAuto.classList.remove('active');
     els.settingsGrid.classList.remove('hidden');
-    els.settingsAuto.classList.add('hidden');
-  } else {
-    els.modeGrid.classList.remove('active');
+  } else if (settings.mode === 'auto') {
     els.modeAuto.classList.add('active');
-    els.settingsGrid.classList.add('hidden');
     els.settingsAuto.classList.remove('hidden');
+  } else if (settings.mode === 'custom') {
+    els.modeCustom.classList.add('active');
+    els.settingsCustom.classList.remove('hidden');
   }
 }
 
@@ -1767,7 +1950,7 @@ async function processImageBackground(fileObj) {
 
         const blob = await imglyRemoveBackground(inputSource, {
           model: modelSize,
-          publicPath: `${window.location.origin}/resources/`,
+          publicPath: new URL('resources/', window.location.href).href,
           progress: (key, current, total) => {
             const pct = Math.round((current / total) * 100);
             if (textEl) {
@@ -1881,6 +2064,20 @@ function sliceFile(fileObj) {
       fileObj.settings.skipEmpty,
       fileObj.settings.autoTolerance
     );
+  } else if (mode === 'custom') {
+    const region = fileObj.settings.customRegion;
+    if (region && region.width > 0 && region.height > 0) {
+      fileObj.slices = sliceCustomGrid(
+        imgSource,
+        region,
+        fileObj.settings.customColLines || [],
+        fileObj.settings.customRowLines || [],
+        fileObj.settings.skipEmpty,
+        fileObj.settings.autoTolerance
+      );
+    } else {
+      fileObj.slices = [];
+    }
   } else {
     fileObj.slices = sliceAuto(
       imgSource,
@@ -1932,10 +2129,494 @@ function refreshActiveFileView() {
 // ----------------------------------------------------
 // Canvas Visualizer Rendering
 // ----------------------------------------------------
+// ----------------------------------------------------
 function clearCanvas() {
   ctx.clearRect(0, 0, els.canvas.width, els.canvas.height);
   els.canvas.width = 0;
   els.canvas.height = 0;
+}
+
+// ----------------------------------------------------
+// Custom Grid Functions
+// ----------------------------------------------------
+
+/** Sync custom region from the numeric inputs */
+function syncCustomRegionFromUI() {
+  const x = Math.max(0, parseInt(els.customRegionX.value) || 0);
+  const y = Math.max(0, parseInt(els.customRegionY.value) || 0);
+  const w = Math.max(1, parseInt(els.customRegionW.value) || 1);
+  const h = Math.max(1, parseInt(els.customRegionH.value) || 1);
+  state.activeSettings.customRegion = { x, y, width: w, height: h };
+}
+
+/** Update the region numeric inputs from state */
+function syncCustomRegionToUI() {
+  const r = state.activeSettings.customRegion;
+  if (!r) return;
+  els.customRegionX.value = Math.round(r.x);
+  els.customRegionY.value = Math.round(r.y);
+  els.customRegionW.value = Math.round(r.width);
+  els.customRegionH.value = Math.round(r.height);
+}
+
+/** Set region to full image dimensions */
+function setRegionToFullImage() {
+  const activeFile = getActiveFile();
+  if (!activeFile) return;
+  const imgW = activeFile.imgElement.naturalWidth;
+  const imgH = activeFile.imgElement.naturalHeight;
+  state.activeSettings.customRegion = { x: 0, y: 0, width: imgW, height: imgH };
+  syncCustomRegionToUI();
+  generateEqualDividers();
+  syncSettingsFromUI();
+  reSliceActiveFile();
+}
+
+/** Generate equally-spaced divider lines within the current region */
+function generateEqualDividers() {
+  const region = state.activeSettings.customRegion;
+  if (!region || region.width <= 0 || region.height <= 0) return;
+
+  const cols = state.activeSettings.customCols || parseInt(els.customCols.value) || 3;
+  const rows = state.activeSettings.customRows || parseInt(els.customRows.value) || 3;
+
+  // Generate column dividers (vertical lines)
+  const colLines = [];
+  for (let i = 1; i < cols; i++) {
+    colLines.push(region.x + (region.width * i) / cols);
+  }
+  
+  // Generate row dividers (horizontal lines)
+  const rowLines = [];
+  for (let i = 1; i < rows; i++) {
+    rowLines.push(region.y + (region.height * i) / rows);
+  }
+
+  state.activeSettings.customColLines = colLines;
+  state.activeSettings.customRowLines = rowLines;
+}
+
+/** Toggle region selection mode */
+function toggleRegionSelectMode() {
+  if (state.customGrid.isSelectingRegion) {
+    exitRegionSelectMode();
+  } else {
+    state.customGrid.isSelectingRegion = true;
+    state.customGrid.regionDragStart = null;
+    state.customGrid.regionDragCurrent = null;
+    els.btnSelectRegion.classList.add('active');
+    els.canvasViewport.classList.add('region-selecting');
+  }
+}
+
+/** Exit region selection mode */
+function exitRegionSelectMode() {
+  state.customGrid.isSelectingRegion = false;
+  state.customGrid.regionDragStart = null;
+  state.customGrid.regionDragCurrent = null;
+  els.btnSelectRegion.classList.remove('active');
+  els.canvasViewport.classList.remove('region-selecting');
+}
+
+/** Check if coords are near a guideline, returns { type, index } or null */
+function findGuidelineAtCoords(coords) {
+  if (state.activeSettings.mode !== 'custom') return null;
+  const region = state.activeSettings.customRegion;
+  if (!region) return null;
+
+  const threshold = Math.max(3, 5 / state.zoom); // Pixel tolerance
+
+  // Check column lines (vertical)
+  const colLines = state.activeSettings.customColLines || [];
+  for (let i = 0; i < colLines.length; i++) {
+    if (Math.abs(coords.x - colLines[i]) < threshold &&
+        coords.y >= region.y && coords.y <= region.y + region.height) {
+      return { type: 'col', index: i };
+    }
+  }
+
+  // Check row lines (horizontal)
+  const rowLines = state.activeSettings.customRowLines || [];
+  for (let i = 0; i < rowLines.length; i++) {
+    if (Math.abs(coords.y - rowLines[i]) < threshold &&
+        coords.x >= region.x && coords.x <= region.x + region.width) {
+      return { type: 'row', index: i };
+    }
+  }
+
+  return null;
+}
+
+/** Check if coords are on a region edge/handle, returns edge string or null */
+function findRegionEdgeAtCoords(coords) {
+  if (state.activeSettings.mode !== 'custom') return null;
+  const region = state.activeSettings.customRegion;
+  if (!region) return null;
+
+  const threshold = Math.max(4, 6 / state.zoom);
+  const r = region;
+
+  const onLeft = Math.abs(coords.x - r.x) < threshold;
+  const onRight = Math.abs(coords.x - (r.x + r.width)) < threshold;
+  const onTop = Math.abs(coords.y - r.y) < threshold;
+  const onBottom = Math.abs(coords.y - (r.y + r.height)) < threshold;
+  const withinX = coords.x >= r.x - threshold && coords.x <= r.x + r.width + threshold;
+  const withinY = coords.y >= r.y - threshold && coords.y <= r.y + r.height + threshold;
+
+  if (onTop && onLeft) return 'nw';
+  if (onTop && onRight) return 'ne';
+  if (onBottom && onLeft) return 'sw';
+  if (onBottom && onRight) return 'se';
+  if (onTop && withinX) return 'n';
+  if (onBottom && withinX) return 's';
+  if (onLeft && withinY) return 'w';
+  if (onRight && withinY) return 'e';
+
+  // Check if inside region for move
+  if (coords.x >= r.x && coords.x <= r.x + r.width &&
+      coords.y >= r.y && coords.y <= r.y + r.height) {
+    return 'move';
+  }
+
+  return null;
+}
+
+/** Draw the custom grid overlay on the canvas */
+function drawCustomGridOverlay(canvasW, canvasH) {
+  const region = state.activeSettings.customRegion;
+  
+  // Draw region selection preview if in selection mode and dragging
+  if (state.customGrid.isSelectingRegion && 
+      state.customGrid.regionDragStart && state.customGrid.regionDragCurrent) {
+    const start = state.customGrid.regionDragStart;
+    const current = state.customGrid.regionDragCurrent;
+    const rx = Math.min(start.x, current.x);
+    const ry = Math.min(start.y, current.y);
+    const rw = Math.abs(current.x - start.x);
+    const rh = Math.abs(current.y - start.y);
+    
+    // Darken everything outside
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    ctx.fillRect(0, 0, canvasW, ry);
+    ctx.fillRect(0, ry, rx, rh);
+    ctx.fillRect(rx + rw, ry, canvasW - rx - rw, rh);
+    ctx.fillRect(0, ry + rh, canvasW, canvasH - ry - rh);
+    
+    // Selection rectangle
+    ctx.strokeStyle = 'rgba(59, 210, 250, 0.9)';
+    ctx.lineWidth = Math.max(1, 2 / state.zoom);
+    ctx.setLineDash([6 / state.zoom, 4 / state.zoom]);
+    ctx.strokeRect(rx, ry, rw, rh);
+    ctx.setLineDash([]);
+    return;
+  }
+
+  if (!region || region.width <= 0 || region.height <= 0) return;
+
+  // Darken outside the region
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+  // Top
+  ctx.fillRect(0, 0, canvasW, region.y);
+  // Left
+  ctx.fillRect(0, region.y, region.x, region.height);
+  // Right
+  ctx.fillRect(region.x + region.width, region.y, canvasW - region.x - region.width, region.height);
+  // Bottom
+  ctx.fillRect(0, region.y + region.height, canvasW, canvasH - region.y - region.height);
+
+  // Region border
+  ctx.strokeStyle = 'rgba(59, 210, 250, 0.85)';
+  ctx.lineWidth = Math.max(1, 2 / state.zoom);
+  ctx.setLineDash([]);
+  ctx.strokeRect(region.x, region.y, region.width, region.height);
+
+  // Corner handles
+  const handleSize = Math.max(4, 6 / state.zoom);
+  ctx.fillStyle = 'rgba(59, 210, 250, 0.95)';
+  const corners = [
+    [region.x, region.y],
+    [region.x + region.width, region.y],
+    [region.x, region.y + region.height],
+    [region.x + region.width, region.y + region.height]
+  ];
+  corners.forEach(([cx, cy]) => {
+    ctx.fillRect(cx - handleSize / 2, cy - handleSize / 2, handleSize, handleSize);
+  });
+
+  // Draw divider lines
+  const colLines = state.activeSettings.customColLines || [];
+  const rowLines = state.activeSettings.customRowLines || [];
+  const hoveredGL = state.customGrid.hoveredGuideline;
+
+  // Vertical dividers (column lines)
+  colLines.forEach((x, i) => {
+    const isHovered = hoveredGL && hoveredGL.type === 'col' && hoveredGL.index === i;
+    const isDragging = state.customGrid.isDraggingGuideline && 
+                       state.customGrid.dragGuidelineType === 'col' && 
+                       state.customGrid.dragGuidelineIndex === i;
+    
+    if (isHovered || isDragging) {
+      ctx.strokeStyle = 'rgba(255, 200, 50, 0.95)';
+      ctx.lineWidth = Math.max(2, 3 / state.zoom);
+    } else {
+      ctx.strokeStyle = 'rgba(59, 210, 250, 0.5)';
+      ctx.lineWidth = Math.max(1, 1.5 / state.zoom);
+    }
+    ctx.setLineDash([4 / state.zoom, 3 / state.zoom]);
+    ctx.beginPath();
+    ctx.moveTo(x, region.y);
+    ctx.lineTo(x, region.y + region.height);
+    ctx.stroke();
+  });
+
+  // Horizontal dividers (row lines)
+  rowLines.forEach((y, i) => {
+    const isHovered = hoveredGL && hoveredGL.type === 'row' && hoveredGL.index === i;
+    const isDragging = state.customGrid.isDraggingGuideline && 
+                       state.customGrid.dragGuidelineType === 'row' && 
+                       state.customGrid.dragGuidelineIndex === i;
+
+    if (isHovered || isDragging) {
+      ctx.strokeStyle = 'rgba(255, 200, 50, 0.95)';
+      ctx.lineWidth = Math.max(2, 3 / state.zoom);
+    } else {
+      ctx.strokeStyle = 'rgba(59, 210, 250, 0.5)';
+      ctx.lineWidth = Math.max(1, 1.5 / state.zoom);
+    }
+    ctx.setLineDash([4 / state.zoom, 3 / state.zoom]);
+    ctx.beginPath();
+    ctx.moveTo(region.x, y);
+    ctx.lineTo(region.x + region.width, y);
+    ctx.stroke();
+  });
+
+  ctx.setLineDash([]);
+}
+
+// ----------------------------------------------------
+// Custom Grid Mouse Handlers
+// ----------------------------------------------------
+
+/** Handle mousedown for custom grid interactions */
+function handleCustomGridMouseDown(e, coords) {
+  if (state.activeSettings.mode !== 'custom') return false;
+
+  // Region selection mode
+  if (state.customGrid.isSelectingRegion) {
+    state.customGrid.regionDragStart = { ...coords };
+    state.customGrid.regionDragCurrent = { ...coords };
+    return true; // Consume event
+  }
+
+  // Check guideline drag
+  const gl = findGuidelineAtCoords(coords);
+  if (gl) {
+    state.customGrid.isDraggingGuideline = true;
+    state.customGrid.dragGuidelineType = gl.type;
+    state.customGrid.dragGuidelineIndex = gl.index;
+    els.canvasViewport.classList.add('guideline-dragging');
+    return true;
+  }
+
+  // Check region edge/move drag
+  const edge = findRegionEdgeAtCoords(coords);
+  if (edge) {
+    state.customGrid.isDraggingRegion = true;
+    state.customGrid.regionDragMode = edge;
+    state.customGrid.regionDragOffset = { x: coords.x, y: coords.y };
+    if (edge === 'move') {
+      els.canvasViewport.classList.add('region-moving');
+    }
+    return true;
+  }
+
+  // Don't intercept — let panning work when clicking outside the region
+  return false;
+}
+
+/** Handle mousemove for custom grid interactions */
+function handleCustomGridMouseMove(e, coords) {
+  if (state.activeSettings.mode !== 'custom') return false;
+
+  // Region selection drag
+  if (state.customGrid.isSelectingRegion && state.customGrid.regionDragStart) {
+    state.customGrid.regionDragCurrent = { ...coords };
+    drawCanvas();
+    return true;
+  }
+
+  // Guideline dragging
+  if (state.customGrid.isDraggingGuideline) {
+    const region = state.activeSettings.customRegion;
+    if (!region) return true;
+
+    const type = state.customGrid.dragGuidelineType;
+    const index = state.customGrid.dragGuidelineIndex;
+    const minGap = 2; // Minimum pixels between dividers
+
+    if (type === 'col') {
+      const lines = state.activeSettings.customColLines;
+      const minX = (index === 0) ? region.x + minGap : lines[index - 1] + minGap;
+      const maxX = (index === lines.length - 1) ? region.x + region.width - minGap : lines[index + 1] - minGap;
+      lines[index] = Math.max(minX, Math.min(maxX, coords.x));
+    } else {
+      const lines = state.activeSettings.customRowLines;
+      const minY = (index === 0) ? region.y + minGap : lines[index - 1] + minGap;
+      const maxY = (index === lines.length - 1) ? region.y + region.height - minGap : lines[index + 1] - minGap;
+      lines[index] = Math.max(minY, Math.min(maxY, coords.y));
+    }
+
+    syncSettingsFromUI();
+    sliceFile(getActiveFile());
+    drawCanvas();
+    renderPreviews();
+    updateExportStats();
+    return true;
+  }
+
+  // Region edge dragging
+  if (state.customGrid.isDraggingRegion) {
+    const region = state.activeSettings.customRegion;
+    if (!region) return true;
+    
+    const dx = coords.x - state.customGrid.regionDragOffset.x;
+    const dy = coords.y - state.customGrid.regionDragOffset.y;
+    const mode = state.customGrid.regionDragMode;
+    const activeFile = getActiveFile();
+    const imgW = activeFile ? activeFile.imgElement.naturalWidth : 10000;
+    const imgH = activeFile ? activeFile.imgElement.naturalHeight : 10000;
+
+    let newX = region.x, newY = region.y, newW = region.width, newH = region.height;
+
+    if (mode === 'move') {
+      newX = Math.max(0, Math.min(imgW - newW, region.x + dx));
+      newY = Math.max(0, Math.min(imgH - newH, region.y + dy));
+      const actualDx = newX - region.x;
+      const actualDy = newY - region.y;
+      
+      if (state.activeSettings.customColLines) {
+        state.activeSettings.customColLines = state.activeSettings.customColLines.map(x => x + actualDx);
+      }
+      if (state.activeSettings.customRowLines) {
+        state.activeSettings.customRowLines = state.activeSettings.customRowLines.map(y => y + actualDy);
+      }
+    } else {
+      if (mode.includes('w')) { newX = Math.max(0, region.x + dx); newW = region.width - (newX - region.x); }
+      if (mode.includes('e')) { newW = Math.max(10, region.width + dx); }
+      if (mode.includes('n')) { newY = Math.max(0, region.y + dy); newH = region.height - (newY - region.y); }
+      if (mode.includes('s')) { newH = Math.max(10, region.height + dy); }
+
+      // Clamp to image bounds
+      if (newX + newW > imgW) newW = imgW - newX;
+      if (newY + newH > imgH) newH = imgH - newY;
+      if (newW < 10) newW = 10;
+      if (newH < 10) newH = 10;
+    }
+
+    state.activeSettings.customRegion = { x: newX, y: newY, width: newW, height: newH };
+    state.customGrid.regionDragOffset = { x: coords.x, y: coords.y };
+    
+    syncCustomRegionToUI();
+    if (mode !== 'move') {
+      generateEqualDividers();
+    }
+    syncSettingsFromUI();
+    sliceFile(getActiveFile());
+    drawCanvas();
+    renderPreviews();
+    updateExportStats();
+    return true;
+  }
+
+  // Hover detection for cursor changes
+  if (!state.isDragging) {
+    const gl = findGuidelineAtCoords(coords);
+    const oldHovered = state.customGrid.hoveredGuideline;
+    state.customGrid.hoveredGuideline = gl;
+
+    // Remove previous cursor classes
+    els.canvasViewport.classList.remove('guideline-hover-col', 'guideline-hover-row',
+      'region-edge-n', 'region-edge-s', 'region-edge-e', 'region-edge-w',
+      'region-edge-nw', 'region-edge-ne', 'region-edge-sw', 'region-edge-se', 'region-moving');
+
+    if (gl) {
+      if (gl.type === 'col') els.canvasViewport.classList.add('guideline-hover-col');
+      else els.canvasViewport.classList.add('guideline-hover-row');
+      
+      if (!oldHovered || oldHovered.type !== gl.type || oldHovered.index !== gl.index) {
+        drawCanvas();
+      }
+      return false; // Don't consume — allow default hover behavior too
+    }
+
+    // Check region edge hover
+    const edge = findRegionEdgeAtCoords(coords);
+    if (edge && edge !== 'move') {
+      els.canvasViewport.classList.add(`region-edge-${edge}`);
+    }
+
+    if (oldHovered) {
+      drawCanvas();
+    }
+  }
+
+  return false;
+}
+
+/** Handle mouseup for custom grid interactions */
+function handleCustomGridMouseUp(e, coords) {
+  if (state.activeSettings.mode !== 'custom') return false;
+
+  // Complete region selection
+  if (state.customGrid.isSelectingRegion && state.customGrid.regionDragStart) {
+    const start = state.customGrid.regionDragStart;
+    const end = coords || state.customGrid.regionDragCurrent || start;
+    
+    const x = Math.min(start.x, end.x);
+    const y = Math.min(start.y, end.y);
+    const w = Math.abs(end.x - start.x);
+    const h = Math.abs(end.y - start.y);
+
+    if (w > 5 && h > 5) {
+      // Clamp to image bounds
+      const activeFile = getActiveFile();
+      const imgW = activeFile ? activeFile.imgElement.naturalWidth : w;
+      const imgH = activeFile ? activeFile.imgElement.naturalHeight : h;
+      
+      state.activeSettings.customRegion = {
+        x: Math.max(0, Math.round(x)),
+        y: Math.max(0, Math.round(y)),
+        width: Math.min(Math.round(w), imgW - Math.max(0, Math.round(x))),
+        height: Math.min(Math.round(h), imgH - Math.max(0, Math.round(y)))
+      };
+      syncCustomRegionToUI();
+      generateEqualDividers();
+      syncSettingsFromUI();
+      reSliceActiveFile();
+    }
+
+    exitRegionSelectMode();
+    return true;
+  }
+
+  // End guideline drag
+  if (state.customGrid.isDraggingGuideline) {
+    state.customGrid.isDraggingGuideline = false;
+    state.customGrid.dragGuidelineType = null;
+    state.customGrid.dragGuidelineIndex = null;
+    els.canvasViewport.classList.remove('guideline-dragging');
+    return true;
+  }
+
+  // End region edge drag
+  if (state.customGrid.isDraggingRegion) {
+    state.customGrid.isDraggingRegion = false;
+    state.customGrid.regionDragMode = null;
+    state.customGrid.regionDragOffset = null;
+    return true;
+  }
+
+  return false;
 }
 
 function drawCanvas() {
@@ -2006,6 +2687,11 @@ function drawCanvas() {
       ctx.fillText(label, slice.x + 3, slice.y + fontSize + 2);
     }
   });
+
+  // 3. Custom Grid overlay rendering
+  if (state.activeSettings.mode === 'custom') {
+    drawCustomGridOverlay(w, h);
+  }
 }
 
 // ----------------------------------------------------
@@ -2073,7 +2759,26 @@ function handleCanvasWheel(e) {
 }
 
 function handleCanvasDragStart(e) {
+  if (e.button === 1 || (e.button === 0 && e.shiftKey)) {
+    // Allow panning with middle click or Shift + left click
+    state.isDragging = true;
+    state.dragStart = { x: e.clientX - state.pan.x, y: e.clientY - state.pan.y };
+    els.canvasViewport.style.cursor = 'grabbing';
+    e.preventDefault();
+    return;
+  }
+
   if (e.button !== 0) return; // Only drag on left-click
+
+  // Custom Grid interactions take priority
+  if (state.activeSettings.mode === 'custom') {
+    const coords = getCanvasMouseCoords(e);
+    if (handleCustomGridMouseDown(e, coords)) {
+      e.preventDefault();
+      return; // Custom grid consumed the event
+    }
+  }
+
   // If clicking on an active slice, we might trigger a toggle, but dragging should take priority on movement
   state.isDragging = true;
   state.dragStart = {
@@ -2084,6 +2789,14 @@ function handleCanvasDragStart(e) {
 }
 
 function handleCanvasDragMove(e) {
+  // Custom Grid drag interactions
+  if (state.activeSettings.mode === 'custom') {
+    const coords = getCanvasMouseCoords(e);
+    if (handleCustomGridMouseMove(e, coords)) {
+      return; // Custom grid consumed the event
+    }
+  }
+
   if (!state.isDragging) return;
   state.pan.x = e.clientX - state.dragStart.x;
   state.pan.y = e.clientY - state.dragStart.y;
@@ -2091,6 +2804,14 @@ function handleCanvasDragMove(e) {
 }
 
 function handleCanvasDragEnd(e) {
+  // Custom Grid drag end
+  if (state.activeSettings.mode === 'custom') {
+    const coords = getCanvasMouseCoords(e);
+    if (handleCustomGridMouseUp(e, coords)) {
+      return; // Custom grid consumed the event
+    }
+  }
+
   if (!state.isDragging) return;
   state.isDragging = false;
   els.canvasViewport.style.cursor = 'grab';
@@ -2127,6 +2848,12 @@ function findSliceAtCoords(coords) {
 function handleCanvasHover(e) {
   if (state.isDragging) return;
   const coords = getCanvasMouseCoords(e);
+
+  // Custom Grid hover handling
+  if (state.activeSettings.mode === 'custom') {
+    handleCustomGridMouseMove(e, coords);
+  }
+
   const slice = findSliceAtCoords(coords);
   
   const oldHoveredId = state.hoveredSliceId;
@@ -2815,17 +3542,93 @@ function getFileName(template, row, col, index, sourceName) {
 // Helper to convert canvas region to blob
 function getSliceBlob(fileObj, slice) {
   return new Promise((resolve) => {
+    const s = fileObj.settings;
+    let targetW = slice.width;
+    let targetH = slice.height;
+
+    // Apply Rematch if enabled
+    if (s.rematchEnabled) {
+      if (s.rematchMode === 'custom') {
+        targetW = s.rematchWidth;
+        targetH = s.rematchHeight;
+      } else if (s.rematchMode === 'largest') {
+        // Find largest slice in this file
+        let maxW = 0;
+        let maxH = 0;
+        fileObj.slices.forEach(sl => {
+          if (sl.width > maxW) maxW = sl.width;
+          if (sl.height > maxH) maxH = sl.height;
+        });
+        targetW = maxW;
+        targetH = maxH;
+      }
+    }
+
     const canvas = document.createElement('canvas');
-    canvas.width = slice.width;
-    canvas.height = slice.height;
+    canvas.width = targetW;
+    canvas.height = targetH;
     const ctx = canvas.getContext('2d');
     
     const imgSource = fileObj.processedCanvas || fileObj.imgElement;
-    ctx.drawImage(
-      imgSource,
-      slice.x, slice.y, slice.width, slice.height,
-      0, 0, slice.width, slice.height
-    );
+    
+    if (!s.rematchEnabled) {
+      // Normal export
+      ctx.drawImage(
+        imgSource,
+        slice.x, slice.y, slice.width, slice.height,
+        0, 0, slice.width, slice.height
+      );
+    } else {
+      // Rematched export
+      const fit = s.rematchFit || 'contain';
+      let dx = 0, dy = 0, dw = targetW, dh = targetH;
+
+      if (fit === 'stretch') {
+        // Stretch ignores aspect ratio
+        ctx.drawImage(
+          imgSource,
+          slice.x, slice.y, slice.width, slice.height,
+          0, 0, targetW, targetH
+        );
+      } else {
+        // Keep aspect ratio for contain/cover
+        const ratioSrc = slice.width / slice.height;
+        const ratioDst = targetW / targetH;
+
+        if (fit === 'contain') {
+          if (ratioSrc > ratioDst) {
+            // Source is wider, fit width
+            dw = targetW;
+            dh = targetW / ratioSrc;
+            dy = (targetH - dh) / 2;
+          } else {
+            // Source is taller, fit height
+            dh = targetH;
+            dw = targetH * ratioSrc;
+            dx = (targetW - dw) / 2;
+          }
+        } else if (fit === 'cover') {
+          if (ratioSrc > ratioDst) {
+            // Source is wider, fill height, crop width
+            dh = targetH;
+            dw = targetH * ratioSrc;
+            dx = (targetW - dw) / 2; // will be negative
+          } else {
+            // Source is taller, fill width, crop height
+            dw = targetW;
+            dh = targetW / ratioSrc;
+            dy = (targetH - dh) / 2; // will be negative
+          }
+        }
+        
+        ctx.drawImage(
+          imgSource,
+          slice.x, slice.y, slice.width, slice.height,
+          Math.round(dx), Math.round(dy), Math.round(dw), Math.round(dh)
+        );
+      }
+    }
+    
     canvas.toBlob((blob) => resolve(blob), 'image/png');
   });
 }

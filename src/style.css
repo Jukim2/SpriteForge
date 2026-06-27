@@ -1336,3 +1336,73 @@ body.light-theme .video-frame-card {
   from { opacity: 0.6; }
   to { opacity: 1; }
 }
+
+/* ========================================
+   Custom Grid Mode Styles
+   ======================================== */
+
+/* Compact 3-button segmented control */
+.segmented-control .control-btn {
+  padding: 7px 8px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* Custom Grid Settings Panel Sections */
+.custom-grid-section {
+  padding: 0;
+}
+
+/* Select Region button active state */
+#btn-select-region.active {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 0 12px rgba(var(--accent-rgb, 230, 126, 34), 0.4);
+  animation: selectRegionPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes selectRegionPulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(var(--accent-rgb, 230, 126, 34), 0.3); }
+  50% { box-shadow: 0 0 18px rgba(var(--accent-rgb, 230, 126, 34), 0.6); }
+}
+
+/* Canvas cursor overrides for custom grid interactions */
+.canvas-viewport.region-selecting {
+  cursor: crosshair !important;
+}
+
+.canvas-viewport.guideline-hover-col {
+  cursor: col-resize !important;
+}
+
+.canvas-viewport.guideline-hover-row {
+  cursor: row-resize !important;
+}
+
+.canvas-viewport.guideline-dragging {
+  cursor: col-resize !important;
+}
+
+.canvas-viewport.region-edge-n,
+.canvas-viewport.region-edge-s {
+  cursor: ns-resize !important;
+}
+
+.canvas-viewport.region-edge-e,
+.canvas-viewport.region-edge-w {
+  cursor: ew-resize !important;
+}
+
+.canvas-viewport.region-edge-nw,
+.canvas-viewport.region-edge-se {
+  cursor: nwse-resize !important;
+}
+
+.canvas-viewport.region-edge-ne,
+.canvas-viewport.region-edge-sw {
+  cursor: nesw-resize !important;
+}
+
+.canvas-viewport.region-moving {
+  cursor: move !important;
+}

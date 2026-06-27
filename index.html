@@ -130,6 +130,7 @@
               <div class="segmented-control">
                 <button id="mode-grid" class="control-btn active" data-mode="grid">Grid Size</button>
                 <button id="mode-auto" class="control-btn" data-mode="auto">Auto-Detect</button>
+                <button id="mode-custom" class="control-btn" data-mode="custom">Custom Grid</button>
               </div>
             </div>
 
@@ -172,6 +173,101 @@
                 </div>
               </div>
             </div>
+
+            <!-- Custom Grid Mode Settings -->
+            <div id="settings-custom" class="mode-settings-panel hidden">
+              <!-- Region Selection -->
+              <div class="custom-grid-section">
+                <label class="control-label" style="margin-bottom: 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.7;">Slice Region</label>
+                <button id="btn-select-region" class="btn btn-accent w-full" style="padding: 6px 12px; font-size: 11px; margin-bottom: 8px;">
+                  <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2.5" fill="none" style="display:inline-block; vertical-align:middle; margin-right: 4px;"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg>
+                  Select Region on Canvas
+                </button>
+                <div class="input-grid">
+                  <div class="input-field">
+                    <label for="custom-region-x">X</label>
+                    <input type="number" id="custom-region-x" value="0" min="0">
+                  </div>
+                  <div class="input-field">
+                    <label for="custom-region-y">Y</label>
+                    <input type="number" id="custom-region-y" value="0" min="0">
+                  </div>
+                  <div class="input-field">
+                    <label for="custom-region-w">Width</label>
+                    <input type="number" id="custom-region-w" value="0" min="1">
+                  </div>
+                  <div class="input-field">
+                    <label for="custom-region-h">Height</label>
+                    <input type="number" id="custom-region-h" value="0" min="1">
+                  </div>
+                </div>
+                <button id="btn-region-full" class="btn btn-secondary w-full" style="padding: 4px 10px; font-size: 10px; margin-top: 4px;" title="Set region to full image">
+                  Use Full Image
+                </button>
+              </div>
+
+              <!-- Grid Division -->
+              <div class="custom-grid-section" style="margin-top: 10px;">
+                <label class="control-label" style="margin-bottom: 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.7;">Grid Division</label>
+                <div class="input-grid">
+                  <div class="input-field">
+                    <label for="custom-cols">Columns</label>
+                    <input type="number" id="custom-cols" value="3" min="1" max="50">
+                  </div>
+                  <div class="input-field">
+                    <label for="custom-rows">Rows</label>
+                    <input type="number" id="custom-rows" value="3" min="1" max="50">
+                  </div>
+                </div>
+                <div style="display: flex; gap: 6px; margin-top: 6px;">
+                  <button id="btn-reset-equal" class="btn btn-secondary" style="flex: 1; padding: 4px 10px; font-size: 10px;" title="Reset dividers to equal spacing">
+                    <svg viewBox="0 0 24 24" width="10" height="10" stroke="currentColor" stroke-width="2.5" fill="none" style="display:inline-block; vertical-align:middle; margin-right: 3px;"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10M23 14l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+                    Reset Equal
+                  </button>
+                </div>
+                <div class="custom-grid-hint" style="margin-top: 6px; font-size: 10px; opacity: 0.5; line-height: 1.4;">
+                  💡 Drag the divider lines on the canvas to adjust cell sizes manually.
+                </div>
+              </div>
+
+              <!-- Rematch Settings -->
+              <div class="custom-grid-section" style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 10px;">
+                <label class="control-label" style="margin-bottom: 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.7;">Rematch (Normalize Size)</label>
+                <label class="checkbox-container">
+                  <input type="checkbox" id="opt-rematch">
+                  <span class="checkmark"></span>
+                  Enable uniform output size
+                </label>
+                <div id="rematch-settings" class="hidden" style="margin-top: 6px;">
+                  <div class="input-field" style="margin-bottom: 8px;">
+                    <label for="rematch-mode">Size Mode</label>
+                    <select id="rematch-mode" style="width: 100%;">
+                      <option value="largest">Auto (Largest Cell)</option>
+                      <option value="custom">Custom Size</option>
+                    </select>
+                  </div>
+                  <div id="rematch-custom-size" class="input-grid hidden">
+                    <div class="input-field">
+                      <label for="rematch-w">Width (px)</label>
+                      <input type="number" id="rematch-w" value="64" min="1">
+                    </div>
+                    <div class="input-field">
+                      <label for="rematch-h">Height (px)</label>
+                      <input type="number" id="rematch-h" value="64" min="1">
+                    </div>
+                  </div>
+                  <div class="input-field" style="margin-top: 6px;">
+                    <label for="rematch-fit">Fit Mode</label>
+                    <select id="rematch-fit" style="width: 100%;">
+                      <option value="contain">Contain (Pad with transparency)</option>
+                      <option value="cover">Cover (Crop to fill)</option>
+                      <option value="stretch">Stretch (Ignore ratio)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+
 
             <!-- Background Removal Section -->
             <div class="control-group spacer-top">

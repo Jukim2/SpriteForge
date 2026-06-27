@@ -90,6 +90,71 @@ export function sliceGrid(image, spriteWidth, spriteHeight, skipEmpty = true, al
 }
 
 /**
+ * Slices a custom rectangular region using user-defined divider lines.
+ * Unlike sliceGrid which uses uniform cell sizes, this allows non-uniform cells
+ * defined by manually adjustable vertical and horizontal divider positions.
+ * 
+ * @param {HTMLImageElement|HTMLCanvasElement} image - Source image or canvas
+ * @param {Object} region - The bounding region { x, y, width, height }
+ * @param {number[]} colLines - Array of x-coordinates for vertical dividers (relative to image, sorted ascending)
+ * @param {number[]} rowLines - Array of y-coordinates for horizontal dividers (relative to image, sorted ascending)
+ * @param {boolean} skipEmpty - Whether to skip fully transparent cells
+ * @param {number} alphaThreshold - Alpha threshold for transparency check
+ * @returns {Array} List of slice objects
+ */
+export function sliceCustomGrid(image, region, colLines, rowLines, skipEmpty = true, alphaThreshold = 5) {
+  const slices = [];
+  const imgWidth = image.naturalWidth || image.width;
+  const imgHeight = image.naturalHeight || image.height;
+
+  // Setup temporary canvas to read pixel data
+  const canvas = document.createElement('canvas');
+  canvas.width = imgWidth;
+  canvas.height = imgHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(image, 0, 0);
+
+  // Build x-boundaries: [region.x, ...colLines, region.x + region.width]
+  const xBounds = [region.x, ...colLines, region.x + region.width].map(v => Math.round(v));
+  // Build y-boundaries: [region.y, ...rowLines, region.y + region.height]
+  const yBounds = [region.y, ...rowLines, region.y + region.height].map(v => Math.round(v));
+
+  const numCols = xBounds.length - 1;
+  const numRows = yBounds.length - 1;
+  let id = 0;
+
+  for (let r = 0; r < numRows; r++) {
+    for (let c = 0; c < numCols; c++) {
+      const x = xBounds[c];
+      const y = yBounds[r];
+      const w = xBounds[c + 1] - x;
+      const h = yBounds[r + 1] - y;
+
+      if (w <= 0 || h <= 0) continue;
+
+      const empty = isRegionEmpty(ctx, x, y, w, h, alphaThreshold);
+      if (skipEmpty && empty) {
+        continue;
+      }
+
+      slices.push({
+        id: id++,
+        x,
+        y,
+        width: w,
+        height: h,
+        row: r,
+        col: c,
+        isEmpty: empty,
+        enabled: true
+      });
+    }
+  }
+
+  return slices;
+}
+
+/**
  * Automatically detects sprite bounding boxes using Connected Component Labeling.
  * @param {HTMLImageElement} image 
  * @param {number} minWidth Minimum width of a valid sprite

@@ -33,8 +33,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <!-- CSS -->
-  <script type="module" crossorigin src="./assets/index-DWljp1wj.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-Dihbd8XU.css">
+  <script type="module" crossorigin src="./assets/index-NXDkFzRa.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-BqFXOQQy.css">
 </head>
 <body class="dark-theme">
   <!-- Background Ambient Glows -->
@@ -366,21 +366,6 @@
               </div>
             </div>
 
-            <!-- Common Export Settings -->
-            <div class="control-group spacer-top">
-              <label class="control-label">Export Filters</label>
-              <label class="checkbox-container">
-                <input type="checkbox" id="opt-skip-empty" checked>
-                <span class="checkmark"></span>
-                Skip empty transparent slices
-              </label>
-            </div>
-
-            <div class="control-group">
-              <label for="opt-naming" class="control-label">File Naming Template</label>
-              <input type="text" id="opt-naming" value="sprite_{row}_{col}" placeholder="sprite_{row}_{col}">
-              <div class="naming-help">Placeholders: <code>{row}</code>, <code>{col}</code>, <code>{index}</code></div>
-            </div>
 
             <div class="action-buttons-container">
               <button id="btn-apply-all" class="btn btn-secondary w-full" title="Apply current settings to all uploaded images">
@@ -694,6 +679,24 @@
 
         <!-- Export Action Footer -->
         <div class="export-footer">
+          <!-- Common Export Settings -->
+          <div class="export-settings" style="display: flex; flex-direction: column; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color);">
+            <div class="control-group" style="margin-bottom: 0;">
+              <label class="control-label">Export Filters</label>
+              <label class="checkbox-container">
+                <input type="checkbox" id="opt-skip-empty" checked>
+                <span class="checkmark"></span>
+                Skip empty transparent slices
+              </label>
+            </div>
+
+            <div class="control-group" style="margin-bottom: 0;">
+              <label for="opt-naming" class="control-label">File Naming Template</label>
+              <input type="text" id="opt-naming" value="sprite_{row}_{col}" placeholder="sprite_{row}_{col}">
+              <div class="naming-help" style="margin-top: 4px;">Placeholders: <code>{row}</code>, <code>{col}</code>, <code>{index}</code></div>
+            </div>
+          </div>
+
           <div class="export-stats" id="export-stats">
             Ready to export 0 slices.
           </div>

@@ -103,6 +103,7 @@ const els = {
   customRows: document.getElementById('custom-rows'),
   btnResetEqual: document.getElementById('btn-reset-equal'),
   btnAutoSnap: document.getElementById('btn-auto-snap'),
+  btnSnapKeep: document.getElementById('btn-snap-keep'),
   
   // Rematch UI elements
   optRematch: document.getElementById('opt-rematch'),
@@ -341,6 +342,7 @@ function bindEvents() {
     reSliceActiveFile();
   });
   els.btnAutoSnap.addEventListener('click', autoSnapDividers);
+  els.btnSnapKeep.addEventListener('click', autoSnapDividersKeep);
   
   // Rematch event bindings
   els.optRematch.addEventListener('change', (e) => {
@@ -450,7 +452,7 @@ function bindEvents() {
 
   // Slice Preview Actions
   els.btnToggleAllSlices.addEventListener('click', toggleAllSlices);
-  els.btnExportActive.addEventListener('click', exportActiveFileZip);
+  els.btnExportActive.addEventListener('click', exportActiveFileIndividual);
   els.btnExportAllBatch.addEventListener('click', exportBatchZip);
 
   // Preview Tabs Event
@@ -2285,6 +2287,115 @@ function autoSnapDividers() {
   reSliceActiveFile();
 }
 
+/** Snap dividers to closest empty spaces while keeping current grid count */
+function autoSnapDividersKeep() {
+  const region = state.activeSettings.customRegion;
+  if (!region || region.width <= 0 || region.height <= 0) return;
+  const activeFile = getActiveFile();
+  if (!activeFile) return;
+
+  const cols = state.activeSettings.customCols || parseInt(els.customCols.value) || 3;
+  const rows = state.activeSettings.customRows || parseInt(els.customRows.value) || 3;
+
+  const idealColLines = [];
+  for (let i = 1; i < cols; i++) {
+    idealColLines.push(region.x + (region.width * i) / cols);
+  }
+  const idealRowLines = [];
+  for (let i = 1; i < rows; i++) {
+    idealRowLines.push(region.y + (region.height * i) / rows);
+  }
+
+  const rw = Math.round(region.width);
+  const rh = Math.round(region.height);
+  const rx = Math.round(region.x);
+  const ry = Math.round(region.y);
+
+  if (rw <= 0 || rh <= 0) return;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = rw;
+  canvas.height = rh;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(activeFile.imgElement, rx, ry, rw, rh, 0, 0, rw, rh);
+
+  const imgData = ctx.getImageData(0, 0, rw, rh);
+  const data = imgData.data;
+  const alphaThreshold = state.activeSettings.autoTolerance !== undefined ? state.activeSettings.autoTolerance : 5;
+
+  const emptyCols = new Uint8Array(rw);
+  for (let x = 0; x < rw; x++) {
+    let empty = 1;
+    for (let y = 0; y < rh; y++) {
+      if (data[(y * rw + x) * 4 + 3] >= alphaThreshold) {
+        empty = 0;
+        break;
+      }
+    }
+    emptyCols[x] = empty;
+  }
+
+  const emptyRows = new Uint8Array(rh);
+  for (let y = 0; y < rh; y++) {
+    let empty = 1;
+    for (let x = 0; x < rw; x++) {
+      if (data[(y * rw + x) * 4 + 3] >= alphaThreshold) {
+        empty = 0;
+        break;
+      }
+    }
+    emptyRows[y] = empty;
+  }
+
+  function getGapCenters(emptyArr, length) {
+    const centers = [];
+    let inGap = false;
+    let start = 0;
+    for (let i = 0; i < length; i++) {
+      if (emptyArr[i]) {
+        if (!inGap) {
+          inGap = true;
+          start = i;
+        }
+      } else {
+        if (inGap) {
+          if (start > 0) {
+            centers.push(start + (i - start) / 2);
+          }
+          inGap = false;
+        }
+      }
+    }
+    return centers;
+  }
+
+  const colGapCenters = getGapCenters(emptyCols, rw).map(cx => region.x + cx);
+  const rowGapCenters = getGapCenters(emptyRows, rh).map(cy => region.y + cy);
+
+  const snapToClosest = (ideal, gaps) => {
+    if (gaps.length === 0) return ideal;
+    let closest = gaps[0];
+    let minDist = Math.abs(ideal - closest);
+    for (let i = 1; i < gaps.length; i++) {
+      const dist = Math.abs(ideal - gaps[i]);
+      if (dist < minDist) {
+        minDist = dist;
+        closest = gaps[i];
+      }
+    }
+    return closest;
+  };
+
+  const finalColLines = idealColLines.map(ideal => snapToClosest(ideal, colGapCenters));
+  const finalRowLines = idealRowLines.map(ideal => snapToClosest(ideal, rowGapCenters));
+
+  state.activeSettings.customColLines = finalColLines;
+  state.activeSettings.customRowLines = finalRowLines;
+
+  syncSettingsFromUI();
+  reSliceActiveFile();
+}
+
 /** Toggle region selection mode */
 function toggleRegionSelectMode() {
   if (state.customGrid.isSelectingRegion) {
@@ -3719,7 +3830,7 @@ function getSliceBlob(fileObj, slice) {
   });
 }
 
-async function exportActiveFileZip() {
+async function exportActiveFileIndividual() {
   const activeFile = getActiveFile();
   if (!activeFile) return;
 
@@ -3727,11 +3838,9 @@ async function exportActiveFileZip() {
   if (enabledSlices.length === 0) return;
 
   showProgressBar(true);
-  updateProgressBar('Compressing active sheet frames...', 0);
+  updateProgressBar('Exporting individual frames...', 0);
 
   try {
-    const zip = new JSZip();
-    const cleanName = activeFile.name.substring(0, activeFile.name.lastIndexOf('.')) || activeFile.name;
     const template = activeFile.settings.namingTemplate;
 
     for (let i = 0; i < enabledSlices.length; i++) {
@@ -3739,25 +3848,22 @@ async function exportActiveFileZip() {
       const blob = await getSliceBlob(activeFile, slice);
       const outputName = `${getFileName(template, slice.row, slice.col, slice.id + 1, activeFile.name)}.png`;
       
-      zip.file(outputName, blob);
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = outputName;
+      link.click();
+      
+      // Short delay to let browser handle multiple downloads
+      await new Promise(r => setTimeout(r, 150));
 
       const percent = Math.round(((i + 1) / enabledSlices.length) * 100);
-      updateProgressBar(`Processing frame ${i+1}/${enabledSlices.length}`, percent);
+      updateProgressBar(`Exported frame ${i+1}/${enabledSlices.length}`, percent);
     }
 
-    updateProgressBar('Generating ZIP download...', 100);
-    const content = await zip.generateAsync({ type: 'blob' });
-    
-    // Trigger download
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(content);
-    link.download = `${cleanName}_sprites.zip`;
-    link.click();
-
-    showToast('Success', `Exported ${enabledSlices.length} sprites for ${activeFile.name}!`, 'success');
+    showToast('Success', `Exported ${enabledSlices.length} sprites for ${activeFile.name} individually!`, 'success');
   } catch (err) {
     console.error(err);
-    showToast('Export Failed', 'An error occurred during ZIP creation.', 'error');
+    showToast('Export Failed', 'An error occurred during export.', 'error');
   } finally {
     showProgressBar(false);
   }

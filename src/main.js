@@ -2248,6 +2248,24 @@ function autoSnapDividers() {
     emptyRows[y] = empty;
   }
 
+  let firstCol = 0, lastCol = rw - 1;
+  while(firstCol <= lastCol && emptyCols[firstCol]) firstCol++;
+  while(lastCol >= firstCol && emptyCols[lastCol]) lastCol--;
+  let firstRow = 0, lastRow = rh - 1;
+  while(firstRow <= lastRow && emptyRows[firstRow]) firstRow++;
+  while(lastRow >= firstRow && emptyRows[lastRow]) lastRow--;
+
+  if (firstCol <= lastCol && firstRow <= lastRow) {
+    region.x = rx + firstCol;
+    region.y = ry + firstRow;
+    region.width = lastCol - firstCol + 1;
+    region.height = lastRow - firstRow + 1;
+    els.customRegionX.value = region.x;
+    els.customRegionY.value = region.y;
+    els.customRegionW.value = region.width;
+    els.customRegionH.value = region.height;
+  }
+
   function getGapCenters(emptyArr, length) {
     const centers = [];
     let inGap = false;
@@ -2297,15 +2315,6 @@ function autoSnapDividersKeep() {
   const cols = state.activeSettings.customCols || parseInt(els.customCols.value) || 3;
   const rows = state.activeSettings.customRows || parseInt(els.customRows.value) || 3;
 
-  const idealColLines = [];
-  for (let i = 1; i < cols; i++) {
-    idealColLines.push(region.x + (region.width * i) / cols);
-  }
-  const idealRowLines = [];
-  for (let i = 1; i < rows; i++) {
-    idealRowLines.push(region.y + (region.height * i) / rows);
-  }
-
   const rw = Math.round(region.width);
   const rh = Math.round(region.height);
   const rx = Math.round(region.x);
@@ -2345,6 +2354,33 @@ function autoSnapDividersKeep() {
       }
     }
     emptyRows[y] = empty;
+  }
+
+  let firstCol = 0, lastCol = rw - 1;
+  while(firstCol <= lastCol && emptyCols[firstCol]) firstCol++;
+  while(lastCol >= firstCol && emptyCols[lastCol]) lastCol--;
+  let firstRow = 0, lastRow = rh - 1;
+  while(firstRow <= lastRow && emptyRows[firstRow]) firstRow++;
+  while(lastRow >= firstRow && emptyRows[lastRow]) lastRow--;
+
+  if (firstCol <= lastCol && firstRow <= lastRow) {
+    region.x = rx + firstCol;
+    region.y = ry + firstRow;
+    region.width = lastCol - firstCol + 1;
+    region.height = lastRow - firstRow + 1;
+    els.customRegionX.value = region.x;
+    els.customRegionY.value = region.y;
+    els.customRegionW.value = region.width;
+    els.customRegionH.value = region.height;
+  }
+
+  const idealColLines = [];
+  for (let i = 1; i < cols; i++) {
+    idealColLines.push(region.x + (region.width * i) / cols);
+  }
+  const idealRowLines = [];
+  for (let i = 1; i < rows; i++) {
+    idealRowLines.push(region.y + (region.height * i) / rows);
   }
 
   function getGapCenters(emptyArr, length) {

@@ -155,15 +155,67 @@ export function sliceCustomGrid(image, region, colLines, rowLines, skipEmpty = t
 }
 
 /**
+ * Merges bounding boxes that are within `gap` pixels of each other, so sprites
+ * made of disconnected parts (detached shadows, particles, floating limbs)
+ * are detected as a single sprite. Repeats until no more merges happen.
+ * @param {Array} boxes - Array of {x, y, width, height}
+ * @param {number} gap - Max pixel distance between boxes to merge (0 disables)
+ * @returns {Array} Merged boxes
+ */
+function mergeNearbyBoxes(boxes, gap) {
+  if (gap <= 0 || boxes.length < 2) return boxes;
+
+  let merged = boxes.map(b => ({ ...b }));
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+    const result = [];
+
+    for (const box of merged) {
+      let target = null;
+      for (const r of result) {
+        // Expand one box by the gap so `gap` means actual max distance between boxes.
+        const overlapX = box.x < r.x + r.width + gap && box.x + box.width > r.x - gap;
+        const overlapY = box.y < r.y + r.height + gap && box.y + box.height > r.y - gap;
+        if (overlapX && overlapY) {
+          target = r;
+          break;
+        }
+      }
+
+      if (target) {
+        const minX = Math.min(target.x, box.x);
+        const minY = Math.min(target.y, box.y);
+        const maxX = Math.max(target.x + target.width, box.x + box.width);
+        const maxY = Math.max(target.y + target.height, box.y + box.height);
+        target.x = minX;
+        target.y = minY;
+        target.width = maxX - minX;
+        target.height = maxY - minY;
+        changed = true;
+      } else {
+        result.push(box);
+      }
+    }
+
+    merged = result;
+  }
+
+  return merged;
+}
+
+/**
  * Automatically detects sprite bounding boxes using Connected Component Labeling.
- * @param {HTMLImageElement} image 
+ * @param {HTMLImageElement} image
  * @param {number} minWidth Minimum width of a valid sprite
  * @param {number} minHeight Minimum height of a valid sprite
  * @param {number} alphaThreshold Alpha threshold to consider pixel as solid (0-255)
  * @param {number} rowYThreshold Y distance within which sprites are grouped into the same row
+ * @param {number} mergeGap Distance (px) within which separate components are merged into one sprite
  * @returns {Array} List of detected slice objects
  */
-export function sliceAuto(image, minWidth = 8, minHeight = 8, alphaThreshold = 5, rowYThreshold = 12) {
+export function sliceAuto(image, minWidth = 8, minHeight = 8, alphaThreshold = 5, rowYThreshold = 12, mergeGap = 0) {
   const width = image.naturalWidth;
   const height = image.naturalHeight;
 
@@ -233,18 +285,25 @@ export function sliceAuto(image, minWidth = 8, minHeight = 8, alphaThreshold = 5
       const boxW = maxX - minX + 1;
       const boxH = maxY - minY + 1;
 
-      if (boxW >= minWidth && boxH >= minHeight) {
-        detectedBoxes.push({
-          x: minX,
-          y: minY,
-          width: boxW,
-          height: boxH,
-          isEmpty: false,
-          enabled: true
-        });
-      }
+      // Keep every component here; size filtering happens after merging so
+      // small fragments (particles, shadows) can still merge into a parent.
+      detectedBoxes.push({
+        x: minX,
+        y: minY,
+        width: boxW,
+        height: boxH,
+        isEmpty: false,
+        enabled: true
+      });
     }
   }
+
+  // Merge components that belong to the same sprite, then drop pieces that
+  // are still too small to be a valid sprite.
+  const mergedBoxes = mergeNearbyBoxes(detectedBoxes, mergeGap)
+    .filter(b => b.width >= minWidth && b.height >= minHeight);
+  detectedBoxes.length = 0;
+  detectedBoxes.push(...mergedBoxes);
 
   // Row grouping & sorting (Row-Major Order)
   // Group boxes into rows based on overlapping/close Y coordinates.

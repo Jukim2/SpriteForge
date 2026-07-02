@@ -1,0 +1,6 @@
+# Byte-exact assets: resource chunks are size-validated against
+# public/resources/resources.json, so EOL conversion corrupts them.
+public/resources/** -text
+public/models/** -text
+*.onnx -text
+*.wasm -text

@@ -15,6 +15,10 @@
     "@imgly/background-removal": "^1.7.0",
     "coi-serviceworker": "^0.1.7",
     "gifshot": "^0.4.5",
-    "jszip": "^3.10.1"
+    "jszip": "^3.10.1",
+    "onnxruntime-web": "^1.27.0",
+    "pica": "^10.0.2",
+    "vtracer-webapp": "^0.4.0",
+    "xbr-js": "^2.0.1"
   }
 }

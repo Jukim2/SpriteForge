@@ -33,7 +33,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <!-- CSS -->
-  <script type="module" crossorigin src="./assets/index-NXDkFzRa.js"></script>
+  <script type="module" crossorigin src="./assets/index-rVLE-Rgm.js"></script>
   <link rel="stylesheet" crossorigin href="./assets/index-BqFXOQQy.css">
 </head>
 <body class="dark-theme">
@@ -63,6 +63,9 @@
         </button>
         <button id="ws-btn-video" class="control-btn" style="padding: 6px 14px; font-size: 11px;" data-mode="video">
           Video Extractor
+        </button>
+        <button id="ws-btn-imgtools" class="control-btn" style="padding: 6px 14px; font-size: 11px;" data-mode="imgtools">
+          Image Tools
         </button>
       </div>
 
@@ -171,6 +174,10 @@
                 <div class="input-field">
                   <label for="auto-row-gap" title="Max Y distance to group slices into the same row">Row Gap (px)</label>
                   <input type="number" id="auto-row-gap" value="12" min="0">
+                </div>
+                <div class="input-field">
+                  <label for="auto-merge-gap" title="Merge separate parts (shadows, particles) within this distance into one sprite. 0 = off">Merge Gap (px)</label>
+                  <input type="number" id="auto-merge-gap" value="0" min="0" max="128">
                 </div>
               </div>
             </div>
@@ -527,6 +534,140 @@
             </div>
           </section>
         </div>
+
+        <!-- Image Tools Mode Sidebar Content -->
+        <div id="imgtools-sidebar-content" class="hidden" style="display: flex; flex-direction: column; height: 100%; width: 100%;">
+          <!-- Image Queue Section -->
+          <section class="panel-section" style="border-bottom: 1px solid var(--border-color); padding: 20px;">
+            <h2 class="section-title">
+              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+              Source Images
+            </h2>
+
+            <div class="file-dropzone" id="imgtools-dropzone">
+              <input type="file" id="imgtools-file-input" multiple accept="image/png, image/jpeg, image/webp" class="hidden-input">
+              <svg class="drop-icon" viewBox="0 0 24 24" width="32" height="32" stroke="currentColor" stroke-width="2" fill="none">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="17 8 12 3 7 8"></polyline>
+                <line x1="12" y1="3" x2="12" y2="15"></line>
+              </svg>
+              <div class="drop-text">
+                <strong>Drag & Drop PNGs</strong> or <span class="browse-link">Browse Files</span>
+              </div>
+              <div class="drop-subtext">Upscale or vectorize multiple images</div>
+            </div>
+
+            <div class="file-list-container">
+              <ul class="file-list" id="imgtools-file-list"></ul>
+            </div>
+          </section>
+
+          <!-- Tool Settings Section -->
+          <section class="panel-section" style="flex: 1; overflow-y: auto; padding: 20px;">
+            <h2 class="section-title">
+              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
+              Tool Configuration
+            </h2>
+
+            <!-- Tool Select -->
+            <div class="control-group">
+              <label class="control-label">Tool</label>
+              <div class="segmented-control">
+                <button id="imgtools-mode-upscale" class="control-btn active" data-tool="upscale">Upscale (PNG)</button>
+                <button id="imgtools-mode-vector" class="control-btn" data-tool="vector">Vectorize (SVG)</button>
+              </div>
+            </div>
+
+            <!-- Upscale Settings -->
+            <div id="imgtools-settings-upscale" class="mode-settings-panel">
+              <div class="input-field" style="margin-bottom: 8px;">
+                <label for="upscale-algorithm">Algorithm</label>
+                <select id="upscale-algorithm" style="width: 100%;">
+                  <option value="ai">AI Super-Resolution (Real-ESRGAN)</option>
+                  <option value="xbr">xBR (Pixel Art Smoothing)</option>
+                  <option value="smooth">Smooth Resample (MKS2013)</option>
+                  <option value="nearest">Nearest (Crisp Pixels)</option>
+                </select>
+              </div>
+              <div id="upscale-ai-model-field" class="input-field" style="margin-bottom: 8px;">
+                <label for="upscale-ai-model">AI Model</label>
+                <select id="upscale-ai-model" style="width: 100%;">
+                  <option value="anime-best">Illustration / Game Art — Best (18MB)</option>
+                  <option value="general-best">General / Photo — Best (67MB)</option>
+                  <option value="anime">Illustration / Game Art — Fast (5MB)</option>
+                  <option value="general">General / Photo — Fast (5MB)</option>
+                </select>
+              </div>
+              <div class="input-field">
+                <label for="upscale-scale">Scale Factor</label>
+                <select id="upscale-scale" style="width: 100%;">
+                  <option value="2">2x</option>
+                  <option value="3">3x</option>
+                  <option value="4" selected>4x</option>
+                </select>
+              </div>
+              <div class="custom-grid-hint" style="margin-top: 8px; font-size: 10px; opacity: 0.55; line-height: 1.5;">
+                💡 <b>AI</b>: best for illustrated/rendered art (runs locally, no upload).
+                <b>Best</b> models use your GPU (WebGPU) when available — on CPU-only
+                machines pick a <b>Fast</b> model instead.
+                <b>xBR</b>: best for pixel art. <b>Smooth</b>: photos & painted art.
+                <b>Nearest</b>: enlarge pixel art without any smoothing.
+              </div>
+            </div>
+
+            <!-- Vectorize Settings -->
+            <div id="imgtools-settings-vector" class="mode-settings-panel hidden">
+              <div class="input-field" style="margin-bottom: 8px;">
+                <label for="vector-mode">Mode</label>
+                <select id="vector-mode" style="width: 100%;">
+                  <option value="pixel">Pixel Perfect (Exact, for Pixel Art)</option>
+                  <option value="trace">Smooth Trace (Curves, for Illustrations)</option>
+                </select>
+              </div>
+              <div id="vector-trace-options">
+                <div class="input-field" style="margin-bottom: 8px;">
+                  <label for="vector-preset">Trace Quality</label>
+                  <select id="vector-preset" style="width: 100%;">
+                    <option value="detailed">Detailed (Max Fidelity)</option>
+                    <option value="balanced" selected>Balanced</option>
+                    <option value="simplified">Simplified (Poster Look)</option>
+                  </select>
+                </div>
+                <div class="input-field">
+                  <label for="vector-colors" id="label-vector-colors">Color Detail (6/8)</label>
+                  <input type="range" id="vector-colors" min="1" max="8" value="6" style="accent-color: var(--primary); width: 100%; height: 28px; background: transparent; cursor: pointer;">
+                </div>
+              </div>
+              <div class="custom-grid-hint" style="margin-top: 8px; font-size: 10px; opacity: 0.55; line-height: 1.5;">
+                💡 <b>Pixel Perfect</b> reproduces every pixel exactly as vector rectangles —
+                infinite zoom with zero blur. <b>Smooth Trace</b> fits bezier curves for a
+                clean scalable illustration look.
+              </div>
+            </div>
+
+            <!-- Process Actions -->
+            <div class="action-buttons-container" style="margin-top: 16px; border-top: 1px solid var(--border-color); padding-top: 16px; display: flex; flex-direction: column; gap: 8px;">
+              <button id="btn-imgtools-process" class="btn btn-accent w-full" disabled style="padding: 10px 16px;">
+                <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.5" fill="none" style="vertical-align: middle; margin-right: 6px;"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+                Process Current Image
+              </button>
+              <button id="btn-imgtools-process-all" class="btn btn-secondary w-full" disabled style="padding: 8px 16px;">
+                Process All Images
+              </button>
+            </div>
+
+            <!-- Export Actions -->
+            <div class="action-buttons-container" style="margin-top: 12px; display: flex; flex-direction: column; gap: 8px;">
+              <button id="btn-imgtools-download" class="btn btn-primary w-full" disabled style="padding: 10px 16px;">
+                <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" style="vertical-align: middle; margin-right: 6px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                Download Current Result
+              </button>
+              <button id="btn-imgtools-download-all" class="btn btn-secondary w-full" disabled style="padding: 8px 16px;">
+                Export All Results (ZIP)
+              </button>
+            </div>
+          </section>
+        </div>
       </aside>
 
       <!-- Center: Visualizer Canvas Viewport -->
@@ -606,6 +747,54 @@
           <div class="canvas-footer-tip">
             <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" class="tip-icon" style="color: var(--accent);"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
             Click a frame to toggle selection. Background removal and animation export apply in real-time.
+          </div>
+        </div>
+
+        <!-- Image Tools Viewport Content -->
+        <div id="imgtools-viewport-content" class="hidden" style="display: flex; flex-direction: column; height: 100%; width: 100%; position: relative;">
+          <!-- Loading Overlay -->
+          <div class="loading-overlay hidden" id="imgtools-loading-overlay" style="z-index: 30;">
+            <div class="spinner"></div>
+            <span id="imgtools-loading-text">Processing image...</span>
+          </div>
+
+          <!-- Toolbar -->
+          <div class="canvas-toolbar">
+            <div class="image-info" id="imgtools-info">No image loaded</div>
+            <div class="viewport-controls">
+              <span class="zoom-level" id="imgtools-result-meta" style="min-width: 0;"></span>
+              <button id="btn-imgtools-zoom-out" class="btn-icon-sm" title="Zoom Out">
+                <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+              </button>
+              <span class="zoom-level" id="imgtools-zoom-level">100%</span>
+              <button id="btn-imgtools-zoom-in" class="btn-icon-sm" title="Zoom In">
+                <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+              </button>
+              <button id="btn-imgtools-zoom-fit" class="btn-text-sm" title="Fit both panes">Fit</button>
+              <button id="btn-imgtools-zoom-reset" class="btn-text-sm" title="100% Zoom">1:1</button>
+            </div>
+          </div>
+
+          <!-- Compare Panes -->
+          <div style="flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--border-color); min-height: 0;">
+            <div style="display: flex; flex-direction: column; min-width: 0; background: var(--bg-surface-solid);">
+              <div style="padding: 6px 12px; font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--text-muted); border-bottom: 1px solid var(--border-color);">Original</div>
+              <div id="imgtools-pane-original" class="imgtools-pane" style="flex: 1; overflow: auto; position: relative; background-color: #12131a; background-image: linear-gradient(45deg, #181922 25%, transparent 25%), linear-gradient(-45deg, #181922 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #181922 75%), linear-gradient(-45deg, transparent 75%, #181922 75%); background-size: 24px 24px; background-position: 0 0, 0 12px, 12px -12px, -12px 0px;">
+                <div class="no-sprites-msg" id="imgtools-original-placeholder" style="border: none; background: transparent; padding: 60px 20px;">Load an image to begin.</div>
+              </div>
+            </div>
+            <div style="display: flex; flex-direction: column; min-width: 0; background: var(--bg-surface-solid);">
+              <div style="padding: 6px 12px; font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--text-muted); border-bottom: 1px solid var(--border-color);">Result</div>
+              <div id="imgtools-pane-result" class="imgtools-pane" style="flex: 1; overflow: auto; position: relative; background-color: #12131a; background-image: linear-gradient(45deg, #181922 25%, transparent 25%), linear-gradient(-45deg, #181922 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #181922 75%), linear-gradient(-45deg, transparent 75%, #181922 75%); background-size: 24px 24px; background-position: 0 0, 0 12px, 12px -12px, -12px 0px;">
+                <div class="no-sprites-msg" id="imgtools-result-placeholder" style="border: none; background: transparent; padding: 60px 20px;">Process the image to see the result.</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tip -->
+          <div class="canvas-footer-tip">
+            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" class="tip-icon"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            Original (left) vs Result (right). Panes scroll together — zoom to inspect quality. AI runs 100% locally in your browser.
           </div>
         </div>
       </section>

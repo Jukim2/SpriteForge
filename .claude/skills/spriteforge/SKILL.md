@@ -45,6 +45,10 @@ node scripts/sf-batch.mjs <folder> [options]
   - `*-best` models are higher quality but slower on CPU. For quick runs use
     `anime` / `general` (the 5MB fast models).
 - `--scale <2|3|4>` — default `4`
+- `--gpu` / `--coreml` / `--cpu` — AI backend. Default is **auto** = WebGPU
+  (system GPU) with CPU fallback. WebGPU is bundled in onnxruntime-node — no
+  native build needed. On Apple Silicon it's ~3-4x faster than CPU. Use `--cpu`
+  only to force CPU (e.g. debugging or if the GPU path misbehaves).
 - `--no-recursive` — only top-level images (default scans subfolders)
 - `--replace` — overwrite originals in place (⚠️ destructive; confirm first)
 - `--out <dir>` — output subfolder name, default `_upscaled`
@@ -61,10 +65,10 @@ structure. Originals are never touched unless `--replace` is passed.
   fast plain resize
 
 ### Guidance when running it
-- AI runs on **CPU** here (onnxruntime-node), so it's slower than the browser's
-  WebGPU path. Warn the user if the folder is large; the `*-best` (esp. 67MB
-  `general-best`) models are the slowest. Suggest a fast model or a small test
-  run first.
+- AI defaults to the **WebGPU** backend (system GPU), matching the browser's
+  speed; it falls back to CPU automatically if WebGPU is unavailable. The header
+  line reports which backend was used. For very large folders or the 67MB
+  `general-best` model, still suggest a small test run first.
 - Before using `--replace`, confirm with the user — it overwrites originals.
 - After it finishes, report how many succeeded/failed and where results landed.
 - Supported inputs: PNG, JPEG, WebP. All outputs are PNG.

@@ -57,7 +57,8 @@ function parseArgs(argv) {
     recursive: true,
     replace: false,
     out: '_upscaled',
-    suffix: null
+    suffix: null,
+    backend: 'auto' // auto(=webgpu→cpu) | gpu | coreml | cpu
   };
   const rest = [];
   for (let i = 0; i < argv.length; i++) {
@@ -75,6 +76,10 @@ function parseArgs(argv) {
       case '--replace': opts.replace = true; break;
       case '--out': opts.out = argv[++i]; break;
       case '--suffix': opts.suffix = argv[++i]; break;
+      case '--gpu': opts.backend = 'gpu'; break;
+      case '--cpu': opts.backend = 'cpu'; break;
+      case '--coreml': opts.backend = 'coreml'; break;
+      case '--backend': opts.backend = argv[++i]; break;
       case '-h': case '--help': opts.help = true; break;
       default:
         if (a.startsWith('--')) throw new Error(`Unknown option: ${a}`);
@@ -85,6 +90,7 @@ function parseArgs(argv) {
   if (![2, 3, 4].includes(opts.scale)) throw new Error('--scale must be 2, 3 or 4');
   if (!['ai', 'xbr', 'smooth', 'nearest'].includes(opts.algo)) throw new Error(`Unknown --algo: ${opts.algo}`);
   if (opts.algo === 'ai' && !AI_MODELS[opts.model]) throw new Error(`Unknown --model: ${opts.model}`);
+  if (!BACKEND_EPS[opts.backend]) throw new Error(`Unknown --backend: ${opts.backend} (use gpu|coreml|cpu|auto)`);
   return opts;
 }
 
@@ -92,7 +98,10 @@ function parseArgs(argv) {
 // Scanning
 // ---------------------------------------------------------------------------
 
-async function scanImages(root, recursive) {
+async function scanImages(root, recursive, outDirName) {
+  // Never re-ingest our own output: skip both the default and the configured
+  // output subfolder name.
+  const excluded = new Set(['_upscaled', outDirName].filter(Boolean));
   const found = [];
   async function walk(dir) {
     const entries = await readdir(dir, { withFileTypes: true });
@@ -100,7 +109,7 @@ async function scanImages(root, recursive) {
       if (e.name.startsWith('.')) continue;
       const full = join(dir, e.name);
       if (e.isDirectory()) {
-        if (e.name === '_upscaled') continue; // never re-ingest our own output
+        if (excluded.has(e.name)) continue;
         if (recursive) await walk(full);
       } else if (e.isFile() && IMAGE_RE.test(e.name)) {
         found.push(full);
@@ -179,16 +188,45 @@ async function upscaleXbr(path, scale) {
 
 let ort;
 const sessions = {};
+let resolvedBackend = null; // 'webgpu' | 'coreml' | 'cpu', set on first session
 
-async function getSession(modelKey) {
+// Execution-provider preference lists (with CPU fallback appended). Benchmarks
+// on Apple Silicon: WebGPU is fastest overall (~3-4x vs CPU); CoreML helps only
+// on the heavy models. onnxruntime-node bundles all three, so no native build
+// is needed — we just request the provider and fall back to CPU if it fails.
+const BACKEND_EPS = {
+  auto: ['webgpu', 'cpu'],
+  gpu: ['webgpu', 'cpu'],
+  coreml: ['coreml', 'cpu'],
+  cpu: ['cpu']
+};
+
+async function getSession(modelKey, backend) {
   if (sessions[modelKey]) return sessions[modelKey];
   if (!ort) ort = await import('onnxruntime-node');
   const model = AI_MODELS[modelKey];
   const buffer = await readFile(join(MODELS_DIR, model.file));
-  sessions[modelKey] = await ort.InferenceSession.create(buffer, {
-    graphOptimizationLevel: 'all'
-  });
-  return sessions[modelKey];
+  const eps = BACKEND_EPS[backend] || BACKEND_EPS.auto;
+
+  // Try each provider in order; the ORT create call itself only accepts a
+  // single-provider list reliably across backends, so probe one at a time.
+  let lastErr;
+  for (const ep of eps) {
+    try {
+      sessions[modelKey] = await ort.InferenceSession.create(buffer, {
+        executionProviders: [ep],
+        graphOptimizationLevel: 'all'
+      });
+      resolvedBackend = ep;
+      return sessions[modelKey];
+    } catch (err) {
+      lastErr = err;
+      if (ep !== 'cpu') {
+        console.warn(`  (${ep} unavailable, falling back — ${err.message.split('\n')[0]})`);
+      }
+    }
+  }
+  throw lastErr;
 }
 
 /** Dilate opaque edge colors into transparent regions to avoid dark halos. */
@@ -237,9 +275,9 @@ async function runTile(session, rgba, tileW, tileH, modelScale) {
   return { data: out.data, width: outW, height: outH };
 }
 
-async function upscaleAI(path, modelKey, onTile) {
+async function upscaleAI(path, modelKey, backend, onTile) {
   const model = AI_MODELS[modelKey];
-  const session = await getSession(modelKey);
+  const session = await getSession(modelKey, backend);
   const modelScale = model.scale;
 
   const src = await decodeRGBA(path);
@@ -335,7 +373,7 @@ function outputPathFor(inputPath, root, opts) {
 async function processOne(path, root, opts) {
   let result;
   if (opts.algo === 'ai') {
-    result = await upscaleAI(path, opts.model, null);
+    result = await upscaleAI(path, opts.model, opts.backend, null);
     if (opts.scale !== AI_MODELS[opts.model].scale) {
       // Resample the 4x AI result down to the requested factor.
       const s = await getSharp();
@@ -368,6 +406,7 @@ Usage: node scripts/sf-batch.mjs <folder> [options]
   --ai|--xbr|--smooth|--nearest   Shorthand for --algo
   --model <key>                   anime-best | general-best | anime | general
   --scale <2|3|4>                 Scale factor (default: 4)
+  --gpu | --coreml | --cpu        AI backend (default: auto = GPU/WebGPU→CPU)
   --no-recursive                  Top-level images only
   --replace                       Overwrite originals in place
   --out <dir>                     Output subfolder name (default: _upscaled)
@@ -393,16 +432,28 @@ async function main() {
   }
 
   const root = resolve(opts.folder);
-  const images = await scanImages(root, opts.recursive);
+  const images = await scanImages(root, opts.recursive, opts.replace ? null : opts.out);
   if (images.length === 0) {
     console.error(`✗ No PNG/JPEG/WebP images found in ${root}`);
     process.exit(1);
   }
 
+  // Resolve the AI backend up front so we can report it (webgpu/coreml/cpu).
+  if (opts.algo === 'ai') {
+    process.stdout.write('  initializing AI model...\r');
+    try {
+      await getSession(opts.model, opts.backend);
+    } catch (err) {
+      console.error(`✗ Failed to initialize AI model: ${err.message}`);
+      process.exit(1);
+    }
+  }
+
+  const backendLabel = opts.algo === 'ai' ? ` · ${resolvedBackend === 'webgpu' ? 'GPU (WebGPU)' : resolvedBackend === 'coreml' ? 'CoreML' : 'CPU'}` : '';
   const modeLabel = opts.algo === 'ai' ? `AI (${AI_MODELS[opts.model].label})` : opts.algo;
   const dest = opts.replace ? 'in place (originals overwritten)' : `${opts.out}/ subfolder`;
   console.log(`SpriteForge batch — ${images.length} image(s)`);
-  console.log(`  algorithm : ${modeLabel} · ${opts.scale}x`);
+  console.log(`  algorithm : ${modeLabel} · ${opts.scale}x${backendLabel}`);
   console.log(`  output    : ${dest}`);
   console.log('');
 

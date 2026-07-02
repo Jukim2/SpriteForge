@@ -83,8 +83,9 @@ const state = {
     frames: [] // Array of { index, time, canvas, processedCanvas, enabled }
   },
   imgTools: {
-    files: [],       // Array of { id, name, imgElement, canvas, result: {type, canvas?, svg?}, resultLabel }
+    files: [],       // Array of { id, name, relPath, canvas, result: {type, canvas?, svg?}, resultLabel }
     activeId: null,
+    dirHandle: null, // FileSystemDirectoryHandle when a folder was opened (Chrome/Edge)
     zoom: 1.0,
     tool: 'upscale', // 'upscale' | 'vector'
     isProcessing: false,
@@ -263,6 +264,9 @@ const els = {
   btnImgToolsProcessAll: document.getElementById('btn-imgtools-process-all'),
   btnImgToolsDownload: document.getElementById('btn-imgtools-download'),
   btnImgToolsDownloadAll: document.getElementById('btn-imgtools-download-all'),
+  btnImgToolsOpenFolder: document.getElementById('btn-imgtools-open-folder'),
+  btnImgToolsSaveFolder: document.getElementById('btn-imgtools-save-folder'),
+  imgToolsFolderHint: document.getElementById('imgtools-folder-hint'),
   imgToolsLoadingOverlay: document.getElementById('imgtools-loading-overlay'),
   imgToolsLoadingText: document.getElementById('imgtools-loading-text'),
   imgToolsInfo: document.getElementById('imgtools-info'),
@@ -3835,7 +3839,38 @@ function updateImgToolsButtons() {
   els.btnImgToolsProcess.disabled = busy || !activeFile;
   els.btnImgToolsProcessAll.disabled = busy || state.imgTools.files.length === 0;
   els.btnImgToolsDownload.disabled = busy || !(activeFile && activeFile.result);
-  els.btnImgToolsDownloadAll.disabled = busy || !state.imgTools.files.some(f => f.result);
+  const hasResults = state.imgTools.files.some(f => f.result);
+  els.btnImgToolsDownloadAll.disabled = busy || !hasResults;
+  els.btnImgToolsSaveFolder.disabled = busy || !hasResults || !state.imgTools.dirHandle;
+}
+
+// Decode a File into an imgTools fileObj (canvas-backed). relPath preserves
+// subfolder structure when the source came from an opened folder.
+function loadImgToolsFileObj(file, relPath) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      canvas.getContext('2d').drawImage(img, 0, 0);
+      resolve({
+        id: `imgtool_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        name: file.name,
+        relPath: relPath || file.name,
+        canvas,
+        result: null,
+        resultLabel: ''
+      });
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error(`Failed to load ${file.name}`));
+    };
+    img.src = url;
+  });
 }
 
 function handleImgToolsFiles(fileList) {
@@ -3845,36 +3880,163 @@ function handleImgToolsFiles(fileList) {
     return;
   }
 
-  files.forEach(file => {
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      const canvas = document.createElement('canvas');
-      canvas.width = img.naturalWidth;
-      canvas.height = img.naturalHeight;
-      canvas.getContext('2d').drawImage(img, 0, 0);
-
-      const fileObj = {
-        id: `imgtool_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        name: file.name,
-        canvas,
-        result: null,
-        resultLabel: ''
-      };
+  files.forEach(async (file) => {
+    try {
+      const fileObj = await loadImgToolsFileObj(file);
       state.imgTools.files.push(fileObj);
-      if (!state.imgTools.activeId) {
-        state.imgTools.activeId = fileObj.id;
-      }
+      if (!state.imgTools.activeId) state.imgTools.activeId = fileObj.id;
       renderImgToolsFileList();
       renderImgToolsView();
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
+    } catch (err) {
       showToast('Load Error', `Failed to load ${file.name}.`, 'error');
-    };
-    img.src = url;
+    }
   });
+}
+
+// Open a local folder, recursively scan for images, and queue them.
+// Uses the File System Access API (Chrome/Edge). The handle is retained so
+// results can be written straight back into a "_upscaled" subfolder.
+async function handleImgToolsOpenFolder() {
+  if (!window.showDirectoryPicker) {
+    showToast('Not Supported', 'Folder access requires Chrome or Edge. Use Browse Files instead.', 'warning');
+    return;
+  }
+  let dirHandle;
+  try {
+    dirHandle = await window.showDirectoryPicker({ id: 'spriteforge-imgtools', mode: 'readwrite' });
+  } catch (err) {
+    return; // user cancelled the picker
+  }
+
+  state.imgTools.dirHandle = dirHandle;
+  showImgToolsLoading(true, `Scanning "${dirHandle.name}"...`);
+
+  const imageRe = /\.(png|jpe?g|webp)$/i;
+  const found = [];
+  async function walk(handle, prefix) {
+    for await (const entry of handle.values()) {
+      if (entry.name.startsWith('.')) continue;
+      if (entry.kind === 'directory') {
+        if (entry.name === '_upscaled') continue; // never re-ingest our own output
+        await walk(entry, `${prefix}${entry.name}/`);
+      } else if (entry.kind === 'file' && imageRe.test(entry.name)) {
+        found.push({ entry, relPath: `${prefix}${entry.name}` });
+      }
+    }
+  }
+
+  let added = 0;
+  try {
+    await walk(dirHandle, '');
+    for (const { entry, relPath } of found) {
+      try {
+        const file = await entry.getFile();
+        const fileObj = await loadImgToolsFileObj(file, relPath);
+        state.imgTools.files.push(fileObj);
+        if (!state.imgTools.activeId) state.imgTools.activeId = fileObj.id;
+        added++;
+      } catch (err) {
+        console.error(`Skipped ${relPath}:`, err);
+      }
+    }
+  } finally {
+    showImgToolsLoading(false);
+    renderImgToolsFileList();
+    renderImgToolsView();
+    updateImgToolsFolderUI();
+  }
+
+  if (added > 0) {
+    showToast('Folder Loaded', `Queued ${added} image${added !== 1 ? 's' : ''} from "${dirHandle.name}". Results save to its _upscaled subfolder.`, 'success');
+  } else {
+    showToast('No Images Found', `"${dirHandle.name}" has no PNG/JPEG/WebP images.`, 'warning');
+  }
+}
+
+// Write every processed result back into <picked folder>/_upscaled, mirroring
+// the original subfolder layout. Original files are never overwritten.
+async function imgToolsSaveToFolder() {
+  const dirHandle = state.imgTools.dirHandle;
+  if (!dirHandle) {
+    showToast('No Folder', 'Use "Open Folder" first to enable saving back.', 'warning');
+    return;
+  }
+  const processed = state.imgTools.files.filter(f => f.result);
+  if (processed.length === 0) {
+    showToast('Nothing to Save', 'Process the images before saving.', 'warning');
+    return;
+  }
+
+  if (dirHandle.queryPermission) {
+    let perm = await dirHandle.queryPermission({ mode: 'readwrite' });
+    if (perm !== 'granted') perm = await dirHandle.requestPermission({ mode: 'readwrite' });
+    if (perm !== 'granted') {
+      showToast('Permission Denied', 'Write access to the folder was not granted.', 'error');
+      return;
+    }
+  }
+
+  state.imgTools.isProcessing = true;
+  updateImgToolsButtons();
+  showImgToolsLoading(true, 'Saving results to folder...');
+
+  let saved = 0;
+  let failed = 0;
+  try {
+    const outRoot = await dirHandle.getDirectoryHandle('_upscaled', { create: true });
+    for (const fileObj of processed) {
+      try {
+        const parts = (fileObj.relPath || fileObj.name).split('/');
+        parts.pop(); // drop filename; result filename is derived separately
+        let outDir = outRoot;
+        for (const part of parts) {
+          outDir = await outDir.getDirectoryHandle(part, { create: true });
+        }
+        const outName = imgToolsResultFilename(fileObj);
+        const fh = await outDir.getFileHandle(outName, { create: true });
+        const writable = await fh.createWritable();
+        if (fileObj.result.type === 'svg') {
+          await writable.write(new Blob([fileObj.result.svg], { type: 'image/svg+xml' }));
+        } else {
+          const blob = await new Promise(res => fileObj.result.canvas.toBlob(res, 'image/png'));
+          await writable.write(blob);
+        }
+        await writable.close();
+        saved++;
+      } catch (err) {
+        console.error(err);
+        failed++;
+      }
+    }
+  } catch (err) {
+    console.error(err);
+    showToast('Save Failed', err.message, 'error');
+  } finally {
+    state.imgTools.isProcessing = false;
+    showImgToolsLoading(false);
+    updateImgToolsButtons();
+  }
+
+  if (saved > 0) {
+    showToast('Saved to Folder', `Wrote ${saved} file${saved !== 1 ? 's' : ''} to "${dirHandle.name}/_upscaled"${failed ? `. ${failed} failed.` : '.'}`, failed ? 'warning' : 'success');
+  } else if (failed > 0) {
+    showToast('Save Failed', `Could not write ${failed} file${failed !== 1 ? 's' : ''}.`, 'error');
+  }
+}
+
+function updateImgToolsFolderUI() {
+  const supported = !!window.showDirectoryPicker;
+  els.btnImgToolsOpenFolder.classList.toggle('hidden', !supported);
+  els.btnImgToolsSaveFolder.classList.toggle('hidden', !supported);
+  if (!supported) return;
+
+  const dir = state.imgTools.dirHandle;
+  if (dir) {
+    els.imgToolsFolderHint.classList.remove('hidden');
+    els.imgToolsFolderHint.innerHTML = `📁 Linked to <b>${dir.name}</b> — results save to <b>${dir.name}/_upscaled</b>.`;
+  } else {
+    els.imgToolsFolderHint.classList.add('hidden');
+  }
 }
 
 function renderImgToolsFileList() {
@@ -4149,6 +4311,11 @@ function bindImgToolsEvents() {
   els.btnImgToolsProcessAll.addEventListener('click', () => {
     imgToolsProcess([...state.imgTools.files]);
   });
+
+  // Folder access (File System Access API — Chrome/Edge)
+  els.btnImgToolsOpenFolder.addEventListener('click', handleImgToolsOpenFolder);
+  els.btnImgToolsSaveFolder.addEventListener('click', imgToolsSaveToFolder);
+  updateImgToolsFolderUI();
 
   // Export actions
   els.btnImgToolsDownload.addEventListener('click', imgToolsDownloadCurrent);

@@ -58,6 +58,8 @@ function parseArgs(argv) {
     replace: false,
     out: '_upscaled',
     suffix: null,
+    format: 'png',  // output encoding: png | webp
+    quality: 90,    // webp quality 1-100 (ignored for png)
     backend: 'auto' // auto(=webgpu→cpu) | gpu | coreml | cpu
   };
   const rest = [];
@@ -68,7 +70,11 @@ function parseArgs(argv) {
       case '--xbr': opts.algo = 'xbr'; break;
       case '--smooth': opts.algo = 'smooth'; break;
       case '--nearest': opts.algo = 'nearest'; break;
+      case '--none': opts.algo = 'none'; break; // compress/re-encode only, no upscale
       case '--algo': opts.algo = argv[++i]; break;
+      case '--webp': opts.format = 'webp'; break;
+      case '--format': opts.format = argv[++i]; break;
+      case '--quality': opts.quality = parseInt(argv[++i], 10); break;
       case '--model': opts.model = argv[++i]; break;
       case '--scale': opts.scale = parseInt(argv[++i], 10); break;
       case '--recursive': opts.recursive = true; break;
@@ -87,8 +93,10 @@ function parseArgs(argv) {
     }
   }
   opts.folder = rest[0] || null;
-  if (![2, 3, 4].includes(opts.scale)) throw new Error('--scale must be 2, 3 or 4');
-  if (!['ai', 'xbr', 'smooth', 'nearest'].includes(opts.algo)) throw new Error(`Unknown --algo: ${opts.algo}`);
+  if (opts.algo !== 'none' && ![2, 3, 4].includes(opts.scale)) throw new Error('--scale must be 2, 3 or 4');
+  if (!['ai', 'xbr', 'smooth', 'nearest', 'none'].includes(opts.algo)) throw new Error(`Unknown --algo: ${opts.algo}`);
+  if (!['png', 'webp'].includes(opts.format)) throw new Error(`Unknown --format: ${opts.format} (use png|webp)`);
+  if (!(opts.quality >= 1 && opts.quality <= 100)) throw new Error('--quality must be 1-100');
   if (opts.algo === 'ai' && !AI_MODELS[opts.model]) throw new Error(`Unknown --model: ${opts.model}`);
   if (!BACKEND_EPS[opts.backend]) throw new Error(`Unknown --backend: ${opts.backend} (use gpu|coreml|cpu|auto)`);
   return opts;
@@ -139,12 +147,14 @@ async function decodeRGBA(path) {
   return { data: new Uint8ClampedArray(data), width: info.width, height: info.height };
 }
 
-async function encodePNG(rgba, width, height, outPath) {
+async function encodeImage(rgba, width, height, outPath, format = 'png', quality = 90) {
   const s = await getSharp();
   await mkdir(dirname(outPath), { recursive: true });
-  await s(Buffer.from(rgba.buffer, rgba.byteOffset, rgba.byteLength), {
+  const pipeline = s(Buffer.from(rgba.buffer, rgba.byteOffset, rgba.byteLength), {
     raw: { width, height, channels: 4 }
-  }).png().toFile(outPath);
+  });
+  if (format === 'webp') await pipeline.webp({ quality }).toFile(outPath);
+  else await pipeline.png().toFile(outPath);
 }
 
 // ---------------------------------------------------------------------------
@@ -288,8 +298,11 @@ async function upscaleAI(path, modelKey, backend, onTile) {
   for (let i = 3; i < work.length; i += 4) { if (work[i] < 255) { hasAlpha = true; break; } }
   if (hasAlpha) bleedEdgeColors(work, srcW, srcH);
 
-  const TILE = 128;
-  const PAD = 8;
+  // Match the web app: WebGPU affords bigger tiles (fewer seams, more context
+  // padding) so results are identical to the browser. Smaller tiles/padding on
+  // WebGPU leave visible tile-seam / grid artifacts on smooth gradients.
+  const TILE = resolvedBackend === 'webgpu' ? 192 : 128;
+  const PAD = resolvedBackend === 'webgpu' ? 16 : 8;
   const outW = srcW * modelScale;
   const outH = srcH * modelScale;
   const outData = new Uint8ClampedArray(outW * outH * 4);
@@ -340,11 +353,16 @@ async function upscaleAI(path, modelKey, backend, onTile) {
     const s = await getSharp();
     const alphaSrc = Buffer.alloc(srcW * srcH);
     for (let p = 0; p < srcW * srcH; p++) alphaSrc[p] = src.data[p * 4 + 3];
-    const alphaBig = await s(alphaSrc, { raw: { width: srcW, height: srcH, channels: 1 } })
+    // sharp expands a 1-channel raw buffer back to 3 interleaved channels on
+    // resize, so read the actual channel stride (info.channels) and take
+    // channel 0. Reading it as if tightly packed corrupts alpha into
+    // horizontal-scanline garbage (fade + banding once composited).
+    const { data: alphaBig, info: aInfo } = await s(alphaSrc, { raw: { width: srcW, height: srcH, channels: 1 } })
       .resize(outW, outH, { kernel: 'lanczos3', fit: 'fill' })
       .raw()
-      .toBuffer();
-    for (let p = 0; p < outW * outH; p++) outData[p * 4 + 3] = alphaBig[p];
+      .toBuffer({ resolveWithObject: true });
+    const aStride = aInfo.channels;
+    for (let p = 0; p < outW * outH; p++) outData[p * 4 + 3] = alphaBig[p * aStride];
   }
 
   return { data: outData, width: outW, height: outH };
@@ -356,6 +374,7 @@ async function upscaleAI(path, modelKey, backend, onTile) {
 
 function defaultSuffix(opts) {
   if (opts.suffix != null) return opts.suffix;
+  if (opts.algo === 'none') return `_${opts.format}`;
   return `_${opts.algo}_x${opts.scale}`;
 }
 
@@ -363,7 +382,7 @@ function outputPathFor(inputPath, root, opts) {
   const suffix = defaultSuffix(opts);
   const dir = dirname(inputPath);
   const base = basename(inputPath, extname(inputPath));
-  const name = `${base}${opts.replace ? '' : suffix}.png`;
+  const name = `${base}${opts.replace ? '' : suffix}.${opts.format}`;
   if (opts.replace) return join(dir, name);
   // Mirror subfolder structure under <root>/<out>/
   const rel = relative(root, dir);
@@ -389,11 +408,13 @@ async function processOne(path, root, opts) {
     result = await upscaleXbr(path, opts.scale);
   } else if (opts.algo === 'nearest') {
     result = await upscaleResize(path, opts.scale, 'nearest');
+  } else if (opts.algo === 'none') {
+    result = await upscaleResize(path, 1, 'nearest'); // decode only; re-encode compresses
   } else {
     result = await upscaleResize(path, opts.scale, 'lanczos3');
   }
   const outPath = outputPathFor(path, root, opts);
-  await encodePNG(result.data, result.width, result.height, outPath);
+  await encodeImage(result.data, result.width, result.height, outPath, opts.format, opts.quality);
   return outPath;
 }
 
@@ -402,10 +423,14 @@ function printHelp() {
 
 Usage: node scripts/sf-batch.mjs <folder> [options]
 
-  --algo <ai|xbr|smooth|nearest>  Algorithm (default: ai)
+  --algo <ai|xbr|smooth|nearest|none>  Algorithm (default: ai; none = compress only)
   --ai|--xbr|--smooth|--nearest   Shorthand for --algo
+  --none                          Re-encode/compress without upscaling
   --model <key>                   anime-best | general-best | anime | general
   --scale <2|3|4>                 Scale factor (default: 4)
+  --format <png|webp>             Output format (default: png)
+  --webp                          Shorthand for --format webp
+  --quality <1-100>               WebP quality (default: 90; ignored for png)
   --gpu | --coreml | --cpu        AI backend (default: auto = GPU/WebGPU→CPU)
   --no-recursive                  Top-level images only
   --replace                       Overwrite originals in place
@@ -414,7 +439,8 @@ Usage: node scripts/sf-batch.mjs <folder> [options]
 
 Examples:
   node scripts/sf-batch.mjs ./sprites --ai --scale 4
-  node scripts/sf-batch.mjs ./sprites --xbr --scale 3 --replace`);
+  node scripts/sf-batch.mjs ./sprites --ai --scale 4 --webp --quality 90
+  node scripts/sf-batch.mjs ./art --none --webp --quality 90   # compress only`);
 }
 
 async function main() {
@@ -451,9 +477,12 @@ async function main() {
 
   const backendLabel = opts.algo === 'ai' ? ` · ${resolvedBackend === 'webgpu' ? 'GPU (WebGPU)' : resolvedBackend === 'coreml' ? 'CoreML' : 'CPU'}` : '';
   const modeLabel = opts.algo === 'ai' ? `AI (${AI_MODELS[opts.model].label})` : opts.algo;
+  const scaleLabel = opts.algo === 'none' ? 'compress only' : `${opts.scale}x`;
+  const formatLabel = opts.format === 'webp' ? `WebP q${opts.quality}` : 'PNG';
   const dest = opts.replace ? 'in place (originals overwritten)' : `${opts.out}/ subfolder`;
   console.log(`SpriteForge batch — ${images.length} image(s)`);
-  console.log(`  algorithm : ${modeLabel} · ${opts.scale}x${backendLabel}`);
+  console.log(`  algorithm : ${modeLabel} · ${scaleLabel}${backendLabel}`);
+  console.log(`  format    : ${formatLabel}`);
   console.log(`  output    : ${dest}`);
   console.log('');
 

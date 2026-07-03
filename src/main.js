@@ -87,15 +87,19 @@ const state = {
     activeId: null,
     dirHandle: null, // FileSystemDirectoryHandle when a folder was opened (Chrome/Edge)
     zoom: 1.0,
-    tool: 'upscale', // 'upscale' | 'vector'
+    tool: 'upscale', // 'upscale' | 'vector' | 'compress'
     isProcessing: false,
     settings: {
       upscaleAlgorithm: 'ai',   // 'ai' | 'xbr' | 'smooth' | 'nearest'
       upscaleAiModel: 'anime-best', // AI_MODELS key ('*-best' = full RRDBNet, others = compact)
       upscaleScale: 4,
+      upscaleFormat: 'png',     // output encoding for upscale result: 'png' | 'webp'
+      upscaleQuality: 90,       // webp quality 1-100 (ignored for png)
       vectorMode: 'pixel',      // 'pixel' | 'trace'
       vectorPreset: 'balanced',
-      vectorColors: 6 // vtracer per-channel color precision (1-8)
+      vectorColors: 6, // vtracer per-channel color precision (1-8)
+      compressFormat: 'webp',   // compress tool output: 'webp' | 'png'
+      compressQuality: 90       // webp quality 1-100
     }
   }
 };
@@ -249,12 +253,23 @@ const els = {
   imgToolsFileList: document.getElementById('imgtools-file-list'),
   imgToolsModeUpscale: document.getElementById('imgtools-mode-upscale'),
   imgToolsModeVector: document.getElementById('imgtools-mode-vector'),
+  imgToolsModeCompress: document.getElementById('imgtools-mode-compress'),
   imgToolsSettingsUpscale: document.getElementById('imgtools-settings-upscale'),
   imgToolsSettingsVector: document.getElementById('imgtools-settings-vector'),
+  imgToolsSettingsCompress: document.getElementById('imgtools-settings-compress'),
   upscaleAlgorithm: document.getElementById('upscale-algorithm'),
   upscaleAiModelField: document.getElementById('upscale-ai-model-field'),
   upscaleAiModel: document.getElementById('upscale-ai-model'),
   upscaleScale: document.getElementById('upscale-scale'),
+  upscaleFormat: document.getElementById('upscale-format'),
+  upscaleQualityField: document.getElementById('upscale-quality-field'),
+  upscaleQuality: document.getElementById('upscale-quality'),
+  labelUpscaleQuality: document.getElementById('label-upscale-quality'),
+  compressFormat: document.getElementById('compress-format'),
+  compressQualityField: document.getElementById('compress-quality-field'),
+  compressQuality: document.getElementById('compress-quality'),
+  labelCompressQuality: document.getElementById('label-compress-quality'),
+  compressStats: document.getElementById('compress-stats'),
   vectorMode: document.getElementById('vector-mode'),
   vectorTraceOptions: document.getElementById('vector-trace-options'),
   vectorPreset: document.getElementById('vector-preset'),
@@ -277,7 +292,9 @@ const els = {
   btnImgToolsZoomFit: document.getElementById('btn-imgtools-zoom-fit'),
   btnImgToolsZoomReset: document.getElementById('btn-imgtools-zoom-reset'),
   imgToolsPaneOriginal: document.getElementById('imgtools-pane-original'),
-  imgToolsPaneResult: document.getElementById('imgtools-pane-result')
+  imgToolsPaneResult: document.getElementById('imgtools-pane-result'),
+  imgToolsOutputContent: document.getElementById('imgtools-output-content'),
+  imgToolsExportSummary: document.getElementById('imgtools-export-summary')
 };
 
 // Canvas Context
@@ -779,9 +796,13 @@ function switchWorkspaceMode(mode) {
   els.videoViewportContent.classList.toggle('hidden', mode !== 'video');
   if (els.imgToolsViewportContent) els.imgToolsViewportContent.classList.toggle('hidden', mode !== 'imgtools');
 
-  // The right preview panel only serves the slicer/video workspaces
+  // The right preview panel is shared: slicer/video use the tabbed slices/animation
+  // views + export footer; image tools swaps in its own export view.
   const previewPanel = document.querySelector('.preview-panel');
-  if (previewPanel) previewPanel.style.display = mode === 'imgtools' ? 'none' : '';
+  if (previewPanel) previewPanel.style.display = '';
+  const isImgTools = mode === 'imgtools';
+  document.querySelector('.preview-tabs')?.classList.toggle('hidden', isImgTools);
+  if (els.imgToolsOutputContent) els.imgToolsOutputContent.classList.toggle('hidden', !isImgTools);
 
   if (mode === 'slicer') {
     // Show tab-slices header
@@ -820,6 +841,11 @@ function switchWorkspaceMode(mode) {
     // Image Tools mode
     els.wsVideoPlayer.pause();
     stopAnimPlayback();
+    // Hide the slicer/video-specific right-panel content; the image-tools
+    // export view is shown via #imgtools-output-content above.
+    document.getElementById('view-slices')?.classList.add('hidden');
+    document.getElementById('view-animation')?.classList.add('hidden');
+    document.querySelector('.export-footer')?.classList.add('hidden');
     renderImgToolsView();
   }
 }
@@ -3814,20 +3840,29 @@ function syncImgToolsSettingsFromUI() {
   s.upscaleAlgorithm = els.upscaleAlgorithm.value;
   s.upscaleAiModel = els.upscaleAiModel.value;
   s.upscaleScale = parseInt(els.upscaleScale.value) || 4;
+  s.upscaleFormat = els.upscaleFormat.value;
+  s.upscaleQuality = parseInt(els.upscaleQuality.value) || 90;
   s.vectorMode = els.vectorMode.value;
   s.vectorPreset = els.vectorPreset.value;
   s.vectorColors = parseInt(els.vectorColors.value) || 6;
+  s.compressFormat = els.compressFormat.value;
+  s.compressQuality = parseInt(els.compressQuality.value) || 90;
 }
 
 function updateImgToolsSettingsUI() {
-  const isUpscale = state.imgTools.tool === 'upscale';
-  els.imgToolsModeUpscale.classList.toggle('active', isUpscale);
-  els.imgToolsModeVector.classList.toggle('active', !isUpscale);
-  els.imgToolsSettingsUpscale.classList.toggle('hidden', !isUpscale);
-  els.imgToolsSettingsVector.classList.toggle('hidden', isUpscale);
+  const tool = state.imgTools.tool;
+  els.imgToolsModeUpscale.classList.toggle('active', tool === 'upscale');
+  els.imgToolsModeVector.classList.toggle('active', tool === 'vector');
+  els.imgToolsModeCompress.classList.toggle('active', tool === 'compress');
+  els.imgToolsSettingsUpscale.classList.toggle('hidden', tool !== 'upscale');
+  els.imgToolsSettingsVector.classList.toggle('hidden', tool !== 'vector');
+  els.imgToolsSettingsCompress.classList.toggle('hidden', tool !== 'compress');
 
   els.upscaleAiModelField.classList.toggle('hidden', els.upscaleAlgorithm.value !== 'ai');
   els.vectorTraceOptions.classList.toggle('hidden', els.vectorMode.value !== 'trace');
+  // Quality sliders only apply to lossy WebP output.
+  els.upscaleQualityField.classList.toggle('hidden', els.upscaleFormat.value !== 'webp');
+  els.compressQualityField.classList.toggle('hidden', els.compressFormat.value !== 'webp');
 
   // xBR only supports integer 2-4x; all current scale options are valid.
   updateImgToolsButtons();
@@ -3842,6 +3877,25 @@ function updateImgToolsButtons() {
   const hasResults = state.imgTools.files.some(f => f.result);
   els.btnImgToolsDownloadAll.disabled = busy || !hasResults;
   els.btnImgToolsSaveFolder.disabled = busy || !hasResults || !state.imgTools.dirHandle;
+  updateImgToolsExportSummary(activeFile, hasResults);
+}
+
+// Summary line shown above the export buttons in the right panel.
+function updateImgToolsExportSummary(activeFile, hasResults) {
+  if (!els.imgToolsExportSummary) return;
+  const doneCount = state.imgTools.files.filter(f => f.result).length;
+  const total = state.imgTools.files.length;
+  if (activeFile && activeFile.result) {
+    els.imgToolsExportSummary.innerHTML =
+      `<strong>${activeFile.name}</strong><br>${activeFile.resultLabel || 'Ready to export.'}` +
+      (total > 1 ? `<br>${doneCount} / ${total} images processed.` : '');
+  } else if (hasResults) {
+    els.imgToolsExportSummary.innerHTML = `${doneCount} / ${total} images processed. Select a processed image to download it individually.`;
+  } else if (total > 0) {
+    els.imgToolsExportSummary.textContent = 'Process an image to enable export.';
+  } else {
+    els.imgToolsExportSummary.textContent = 'Load and process an image to enable export.';
+  }
 }
 
 // Decode a File into an imgTools fileObj (canvas-backed). relPath preserves
@@ -3861,6 +3915,7 @@ function loadImgToolsFileObj(file, relPath) {
         name: file.name,
         relPath: relPath || file.name,
         canvas,
+        origBytes: file.size || 0,
         result: null,
         resultLabel: ''
       });
@@ -3995,10 +4050,8 @@ async function imgToolsSaveToFolder() {
         const outName = imgToolsResultFilename(fileObj);
         const fh = await outDir.getFileHandle(outName, { create: true });
         const writable = await fh.createWritable();
-        if (fileObj.result.type === 'svg') {
-          await writable.write(new Blob([fileObj.result.svg], { type: 'image/svg+xml' }));
-        } else {
-          const blob = await new Promise(res => fileObj.result.canvas.toBlob(res, 'image/png'));
+        {
+          const blob = await imgToolsResultBlob(fileObj.result);
           await writable.write(blob);
         }
         await writable.close();
@@ -4077,12 +4130,37 @@ function showImgToolsLoading(show, text) {
   if (text) els.imgToolsLoadingText.textContent = text;
 }
 
+/**
+ * Encodes a canvas to a Blob. WebP uses the browser's native encoder
+ * (canvas.toBlob 'image/webp') — no dependency needed. quality is 1-100.
+ */
+function encodeCanvasToBlob(canvas, format, quality) {
+  const mime = format === 'webp' ? 'image/webp' : 'image/png';
+  const q = format === 'webp' ? Math.max(0.01, Math.min(1, (quality || 90) / 100)) : undefined;
+  return new Promise(resolve => canvas.toBlob(resolve, mime, q));
+}
+
+function formatBytes(n) {
+  return n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${(n / 1024).toFixed(1)} KB`;
+}
+
 async function processImgToolsFile(fileObj) {
   syncImgToolsSettingsFromUI();
   const s = state.imgTools.settings;
   const onProgress = ({ label }) => showImgToolsLoading(true, `${fileObj.name}: ${label}`);
 
-  if (state.imgTools.tool === 'upscale') {
+  if (state.imgTools.tool === 'compress') {
+    // Pure re-encode of the source pixels — no resize. The win is format (WebP).
+    const fmt = s.compressFormat;
+    const blob = await encodeCanvasToBlob(fileObj.canvas, fmt, s.compressQuality);
+    const orig = fileObj.origBytes || 0;
+    const delta = orig ? Math.round((1 - blob.size / orig) * 100) : null;
+    fileObj.result = { type: 'raster', canvas: fileObj.canvas, format: fmt, quality: s.compressQuality, blob, bytes: blob.size };
+    const qLabel = fmt === 'webp' ? ` q${s.compressQuality}` : '';
+    const deltaLabel = delta != null ? ` (${delta >= 0 ? '−' : '+'}${Math.abs(delta)}% from ${formatBytes(orig)})` : '';
+    fileObj.resultLabel = `${fmt.toUpperCase()}${qLabel} • ${formatBytes(blob.size)}${deltaLabel}`;
+    fileObj.resultSuffix = `_${fmt}`;
+  } else if (state.imgTools.tool === 'upscale') {
     const resultCanvas = await upscaleImage(fileObj.canvas, {
       algorithm: s.upscaleAlgorithm,
       scale: s.upscaleScale,
@@ -4091,8 +4169,11 @@ async function processImgToolsFile(fileObj) {
     });
     const backend = s.upscaleAlgorithm === 'ai' && getAiBackend() === 'webgpu' ? ' · WebGPU' : s.upscaleAlgorithm === 'ai' ? ' · CPU' : '';
     const algoLabels = { ai: `AI (${AI_MODELS[s.upscaleAiModel]?.label || s.upscaleAiModel})`, xbr: 'xBR', smooth: 'MKS2013', nearest: 'Nearest' };
-    fileObj.result = { type: 'png', canvas: resultCanvas };
-    fileObj.resultLabel = `${algoLabels[s.upscaleAlgorithm] || s.upscaleAlgorithm} ${s.upscaleScale}x → ${resultCanvas.width}x${resultCanvas.height}px${backend}`;
+    const fmt = s.upscaleFormat;
+    const blob = await encodeCanvasToBlob(resultCanvas, fmt, s.upscaleQuality);
+    const qLabel = fmt === 'webp' ? ` q${s.upscaleQuality}` : '';
+    fileObj.result = { type: 'raster', canvas: resultCanvas, format: fmt, quality: s.upscaleQuality, blob, bytes: blob.size };
+    fileObj.resultLabel = `${algoLabels[s.upscaleAlgorithm] || s.upscaleAlgorithm} ${s.upscaleScale}x → ${resultCanvas.width}x${resultCanvas.height}px · ${fmt.toUpperCase()}${qLabel} ${formatBytes(blob.size)}${backend}`;
     fileObj.resultSuffix = `_${s.upscaleAlgorithm}_x${s.upscaleScale}`;
   } else {
     const svg = await vectorizeImage(fileObj.canvas, {
@@ -4178,7 +4259,7 @@ function renderImgToolsView() {
 
   // Result pane
   if (activeFile.result) {
-    if (activeFile.result.type === 'png') {
+    if (activeFile.result.type !== 'svg') {
       const resView = document.createElement('canvas');
       resView.width = activeFile.result.canvas.width;
       resView.height = activeFile.result.canvas.height;
@@ -4225,20 +4306,23 @@ function downloadBlob(blob, filename) {
 
 function imgToolsResultFilename(fileObj) {
   const base = fileObj.name.substring(0, fileObj.name.lastIndexOf('.')) || fileObj.name;
-  const ext = fileObj.result.type === 'svg' ? 'svg' : 'png';
+  const r = fileObj.result;
+  const ext = r.type === 'svg' ? 'svg' : (r.format || 'png');
   return `${base}${fileObj.resultSuffix || ''}.${ext}`;
+}
+
+/** Returns the encoded Blob for a result, reusing the one computed at process time. */
+async function imgToolsResultBlob(result) {
+  if (result.type === 'svg') return new Blob([result.svg], { type: 'image/svg+xml' });
+  if (result.blob) return result.blob;
+  return encodeCanvasToBlob(result.canvas, result.format || 'png', result.quality);
 }
 
 async function imgToolsDownloadCurrent() {
   const activeFile = getActiveImgToolsFile();
   if (!activeFile || !activeFile.result) return;
-
-  if (activeFile.result.type === 'svg') {
-    downloadBlob(new Blob([activeFile.result.svg], { type: 'image/svg+xml' }), imgToolsResultFilename(activeFile));
-  } else {
-    const blob = await new Promise(resolve => activeFile.result.canvas.toBlob(resolve, 'image/png'));
-    downloadBlob(blob, imgToolsResultFilename(activeFile));
-  }
+  const blob = await imgToolsResultBlob(activeFile.result);
+  downloadBlob(blob, imgToolsResultFilename(activeFile));
 }
 
 async function imgToolsDownloadAll() {
@@ -4248,12 +4332,8 @@ async function imgToolsDownloadAll() {
   try {
     const zip = new JSZip();
     for (const fileObj of processed) {
-      if (fileObj.result.type === 'svg') {
-        zip.file(imgToolsResultFilename(fileObj), fileObj.result.svg);
-      } else {
-        const blob = await new Promise(resolve => fileObj.result.canvas.toBlob(resolve, 'image/png'));
-        zip.file(imgToolsResultFilename(fileObj), blob);
-      }
+      const blob = await imgToolsResultBlob(fileObj.result);
+      zip.file(imgToolsResultFilename(fileObj), blob);
     }
     const content = await zip.generateAsync({ type: 'blob' });
     downloadBlob(content, 'SpriteForge_ImageTools_Export.zip');
@@ -4295,9 +4375,21 @@ function bindImgToolsEvents() {
     state.imgTools.tool = 'vector';
     updateImgToolsSettingsUI();
   });
+  els.imgToolsModeCompress.addEventListener('click', () => {
+    state.imgTools.tool = 'compress';
+    updateImgToolsSettingsUI();
+  });
 
   // Settings
   els.upscaleAlgorithm.addEventListener('change', updateImgToolsSettingsUI);
+  els.upscaleFormat.addEventListener('change', updateImgToolsSettingsUI);
+  els.compressFormat.addEventListener('change', updateImgToolsSettingsUI);
+  els.upscaleQuality.addEventListener('input', (e) => {
+    els.labelUpscaleQuality.textContent = `WebP Quality (${e.target.value})`;
+  });
+  els.compressQuality.addEventListener('input', (e) => {
+    els.labelCompressQuality.textContent = `WebP Quality (${e.target.value})`;
+  });
   els.vectorMode.addEventListener('change', updateImgToolsSettingsUI);
   els.vectorColors.addEventListener('input', (e) => {
     els.labelVectorColors.textContent = `Color Detail (${e.target.value}/8)`;

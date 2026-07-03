@@ -1470,3 +1470,92 @@ body.light-theme .video-frame-card {
 .help-icon .tooltip-text li {
   margin-bottom: 4px;
 }
+
+/* ── Image Tools: before/after compare panes ─────────────────────── */
+.imgtools-compare {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--border-color);
+  min-height: 0;
+}
+.imgtools-pane-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--bg-surface-solid);
+}
+.imgtools-pane-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 14px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+.imgtools-pane-header::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.7;
+}
+.imgtools-pane-col--result .imgtools-pane-header {
+  color: var(--accent);
+}
+.imgtools-pane-col--result .imgtools-pane-header::before {
+  opacity: 1;
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+.imgtools-pane {
+  flex: 1;
+  overflow: auto;
+  position: relative;
+}
+.imgtools-checker {
+  background-color: #12131a;
+  background-image:
+    linear-gradient(45deg, #181922 25%, transparent 25%),
+    linear-gradient(-45deg, #181922 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #181922 75%),
+    linear-gradient(-45deg, transparent 75%, #181922 75%);
+  background-size: 24px 24px;
+  background-position: 0 0, 0 12px, 12px -12px, -12px 0px;
+}
+
+/* ── Image Tools: right-panel export/output view ─────────────────── */
+.imgtools-output {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  padding: 16px;
+  gap: 14px;
+  overflow-y: auto;
+}
+.imgtools-output-summary {
+  background: var(--bg-surface-solid);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.imgtools-output-summary strong {
+  color: var(--text-main);
+  font-weight: 600;
+}
+.imgtools-output-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: auto;
+}

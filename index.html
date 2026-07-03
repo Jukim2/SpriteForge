@@ -33,8 +33,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <!-- CSS -->
-  <script type="module" crossorigin src="./assets/index-PJjBO8zp.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-BqFXOQQy.css">
+  <script type="module" crossorigin src="./assets/index-D0HIRX_y.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-C-reg6p-.css">
 </head>
 <body class="dark-theme">
   <!-- Background Ambient Glows -->
@@ -579,8 +579,9 @@
             <div class="control-group">
               <label class="control-label">Tool</label>
               <div class="segmented-control">
-                <button id="imgtools-mode-upscale" class="control-btn active" data-tool="upscale">Upscale (PNG)</button>
-                <button id="imgtools-mode-vector" class="control-btn" data-tool="vector">Vectorize (SVG)</button>
+                <button id="imgtools-mode-upscale" class="control-btn active" data-tool="upscale">Upscale</button>
+                <button id="imgtools-mode-vector" class="control-btn" data-tool="vector">Vectorize</button>
+                <button id="imgtools-mode-compress" class="control-btn" data-tool="compress">Compress</button>
               </div>
             </div>
 
@@ -604,13 +605,24 @@
                   <option value="general">General / Photo — Fast (5MB)</option>
                 </select>
               </div>
-              <div class="input-field">
+              <div class="input-field" style="margin-bottom: 8px;">
                 <label for="upscale-scale">Scale Factor</label>
                 <select id="upscale-scale" style="width: 100%;">
                   <option value="2">2x</option>
                   <option value="3">3x</option>
                   <option value="4" selected>4x</option>
                 </select>
+              </div>
+              <div class="input-field" style="margin-bottom: 8px;">
+                <label for="upscale-format">Output Format</label>
+                <select id="upscale-format" style="width: 100%;">
+                  <option value="png" selected>PNG (Lossless)</option>
+                  <option value="webp">WebP (Smaller File)</option>
+                </select>
+              </div>
+              <div id="upscale-quality-field" class="input-field hidden">
+                <label for="upscale-quality" id="label-upscale-quality">WebP Quality (90)</label>
+                <input type="range" id="upscale-quality" min="1" max="100" value="90" style="accent-color: var(--primary); width: 100%; height: 28px; background: transparent; cursor: pointer;">
               </div>
               <div class="custom-grid-hint" style="margin-top: 8px; font-size: 10px; opacity: 0.55; line-height: 1.5;">
                 💡 <b>AI</b>: best for illustrated/rendered art (runs locally, no upload).
@@ -651,6 +663,27 @@
               </div>
             </div>
 
+            <!-- Compress Settings -->
+            <div id="imgtools-settings-compress" class="mode-settings-panel hidden">
+              <div class="input-field" style="margin-bottom: 8px;">
+                <label for="compress-format">Format</label>
+                <select id="compress-format" style="width: 100%;">
+                  <option value="webp" selected>WebP (Recommended)</option>
+                  <option value="png">PNG (Palette / Lossless)</option>
+                </select>
+              </div>
+              <div id="compress-quality-field" class="input-field">
+                <label for="compress-quality" id="label-compress-quality">WebP Quality (90)</label>
+                <input type="range" id="compress-quality" min="1" max="100" value="90" style="accent-color: var(--primary); width: 100%; height: 28px; background: transparent; cursor: pointer;">
+              </div>
+              <div id="compress-stats" class="custom-grid-hint" style="margin-top: 8px; font-size: 10px; opacity: 0.55; line-height: 1.5;">
+                💡 Re-encodes the image without resizing. <b>WebP q90</b> is usually
+                visually identical to the original at a fraction of the size — ideal for
+                gradient art and photos where SVG/PNG are large. Lower the quality for
+                even smaller files. Process to see the before/after size.
+              </div>
+            </div>
+
             <!-- Process Actions -->
             <div class="action-buttons-container" style="margin-top: 16px; border-top: 1px solid var(--border-color); padding-top: 16px; display: flex; flex-direction: column; gap: 8px;">
               <button id="btn-imgtools-process" class="btn btn-accent w-full" disabled style="padding: 10px 16px;">
@@ -659,21 +692,6 @@
               </button>
               <button id="btn-imgtools-process-all" class="btn btn-secondary w-full" disabled style="padding: 8px 16px;">
                 Process All Images
-              </button>
-            </div>
-
-            <!-- Export Actions -->
-            <div class="action-buttons-container" style="margin-top: 12px; display: flex; flex-direction: column; gap: 8px;">
-              <button id="btn-imgtools-download" class="btn btn-primary w-full" disabled style="padding: 10px 16px;">
-                <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" style="vertical-align: middle; margin-right: 6px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-                Download Current Result
-              </button>
-              <button id="btn-imgtools-download-all" class="btn btn-secondary w-full" disabled style="padding: 8px 16px;">
-                Export All Results (ZIP)
-              </button>
-              <button id="btn-imgtools-save-folder" class="btn btn-secondary w-full hidden" disabled style="padding: 8px 16px;">
-                <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" style="vertical-align: middle; margin-right: 6px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
-                Save Results to Folder (_upscaled)
               </button>
             </div>
           </section>
@@ -786,16 +804,16 @@
           </div>
 
           <!-- Compare Panes -->
-          <div style="flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--border-color); min-height: 0;">
-            <div style="display: flex; flex-direction: column; min-width: 0; background: var(--bg-surface-solid);">
-              <div style="padding: 6px 12px; font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--text-muted); border-bottom: 1px solid var(--border-color);">Original</div>
-              <div id="imgtools-pane-original" class="imgtools-pane" style="flex: 1; overflow: auto; position: relative; background-color: #12131a; background-image: linear-gradient(45deg, #181922 25%, transparent 25%), linear-gradient(-45deg, #181922 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #181922 75%), linear-gradient(-45deg, transparent 75%, #181922 75%); background-size: 24px 24px; background-position: 0 0, 0 12px, 12px -12px, -12px 0px;">
+          <div class="imgtools-compare">
+            <div class="imgtools-pane-col">
+              <div class="imgtools-pane-header">Original</div>
+              <div id="imgtools-pane-original" class="imgtools-pane imgtools-checker">
                 <div class="no-sprites-msg" id="imgtools-original-placeholder" style="border: none; background: transparent; padding: 60px 20px;">Load an image to begin.</div>
               </div>
             </div>
-            <div style="display: flex; flex-direction: column; min-width: 0; background: var(--bg-surface-solid);">
-              <div style="padding: 6px 12px; font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--text-muted); border-bottom: 1px solid var(--border-color);">Result</div>
-              <div id="imgtools-pane-result" class="imgtools-pane" style="flex: 1; overflow: auto; position: relative; background-color: #12131a; background-image: linear-gradient(45deg, #181922 25%, transparent 25%), linear-gradient(-45deg, #181922 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #181922 75%), linear-gradient(-45deg, transparent 75%, #181922 75%); background-size: 24px 24px; background-position: 0 0, 0 12px, 12px -12px, -12px 0px;">
+            <div class="imgtools-pane-col imgtools-pane-col--result">
+              <div class="imgtools-pane-header">Result</div>
+              <div id="imgtools-pane-result" class="imgtools-pane imgtools-checker">
                 <div class="no-sprites-msg" id="imgtools-result-placeholder" style="border: none; background: transparent; padding: 60px 20px;">Process the image to see the result.</div>
               </div>
             </div>
@@ -919,6 +937,36 @@
             </div>
             <div class="progress-track">
               <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Image Tools Output / Export View -->
+        <div id="imgtools-output-content" class="hidden" style="display: flex; flex-direction: column; flex: 1; min-height: 0;">
+          <div class="preview-header" style="height: 40px; padding: 0 16px; border-bottom: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between; background: var(--bg-surface);">
+            <h2 class="section-title" style="font-size: 12px;">
+              <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" style="vertical-align: middle; margin-right: 4px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              Export
+            </h2>
+          </div>
+
+          <div class="imgtools-output">
+            <div class="imgtools-output-summary" id="imgtools-export-summary">
+              Process an image to enable export.
+            </div>
+
+            <div class="imgtools-output-actions">
+              <button id="btn-imgtools-download" class="btn btn-primary w-full" disabled style="padding: 10px 16px;">
+                <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" style="vertical-align: middle; margin-right: 6px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                Download Current Result
+              </button>
+              <button id="btn-imgtools-download-all" class="btn btn-secondary w-full" disabled style="padding: 8px 16px;">
+                Export All Results (ZIP)
+              </button>
+              <button id="btn-imgtools-save-folder" class="btn btn-secondary w-full hidden" disabled style="padding: 8px 16px;">
+                <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" style="vertical-align: middle; margin-right: 6px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+                Save Results to Folder (_upscaled)
+              </button>
             </div>
           </div>
         </div>

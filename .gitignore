@@ -33,3 +33,6 @@ yarn-error.log*
 implementation_plan.md
 walkthrough.md
 task.md
+
+# Claude Code local settings (personal)
+.claude/settings.local.json

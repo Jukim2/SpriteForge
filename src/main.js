@@ -6,327 +6,15 @@ import { extractFrames, resolveVideoDuration } from './videoExtractor.js';
 import { upscaleImage, AI_MODELS, getAiBackend } from './upscaler.js';
 import { segmentBackground, isSegModel, BG_SEG_MODELS } from './bgSegmenter.js';
 import { vectorizeImage, svgToDataUrl } from './vectorizer.js';
-
-// Application State
-const state = {
-  files: [],         // Array of { id, file, name, size, imgElement, slices, settings, processedCanvas }
-  activeFileId: null,
-  zoom: 1.0,
-  pan: { x: 0, y: 0 },
-  isDragging: false,
-  dragStart: { x: 0, y: 0 },
-  hoveredSliceId: null,
-  isPickingColor: false, // Flag for canvas color sampler
-  activeSettings: {
-    mode: 'grid',       // 'grid' or 'auto'
-    gridW: 32,
-    gridH: 32,
-    autoMinW: 8,
-    autoMinH: 8,
-    autoTolerance: 5,
-    autoRowGap: 12,
-    autoMergeGap: 0,
-    skipEmpty: true,
-    namingTemplate: 'sprite_{row}_{col}',
-    enableBgRemoval: false,
-    bgRemovalMethod: 'chromakey', // 'chromakey' or 'ai'
-    bgRemovalModelSize: 'medium', // 'small' | 'medium' | 'large'
-    bgColor: '#00ff00',
-    bgTolerance: 15,
-    bgContiguous: true,
-    // Custom Grid settings
-    customRegion: null,    // { x, y, width, height }
-    customCols: 3,
-    customRows: 3,
-    customColLines: [],    // x-coords of vertical dividers
-    customRowLines: [],    // y-coords of horizontal dividers
-    // Rematch settings
-    rematchEnabled: false,
-    rematchMode: 'largest', // 'largest' | 'custom'
-    rematchWidth: 64,
-    rematchHeight: 64,
-    rematchFit: 'contain'  // 'contain' | 'cover' | 'stretch'
-  },
-  anim: {
-    isPlaying: false,
-    fps: 10,
-    currentFrame: 0,
-    timer: null,
-    activeTab: 'slices'
-  },
-  workspaceMode: 'slicer',
-  // Custom Grid interaction state
-  customGrid: {
-    isSelectingRegion: false,
-    regionDragStart: null,      // { x, y } canvas coords where drag started
-    regionDragCurrent: null,    // { x, y } current drag position
-    isDraggingGuideline: false,
-    dragGuidelineType: null,    // 'col' or 'row'
-    dragGuidelineIndex: null,   // index in colLines/rowLines
-    hoveredGuideline: null,     // { type: 'col'|'row', index }
-    isDraggingRegion: false,
-    regionDragMode: null,       // 'move' | 'n' | 's' | 'e' | 'w' | 'nw' | 'ne' | 'sw' | 'se'
-    regionDragOffset: null      // { x, y }
-  },
-  video: {
-    file: null,
-    url: null,
-    duration: 0,
-    interval: 0.2,
-    startRange: 0.0,
-    endRange: 0.0,
-    enableBgRemoval: false,
-    bgRemovalMethod: 'chromakey', // 'chromakey' or 'ai'
-    bgRemovalModelSize: 'medium', // 'small' | 'medium' | 'large'
-    bgColor: '#00ff00',
-    bgTolerance: 15,
-    bgContiguous: true,
-    frames: [] // Array of { index, time, canvas, processedCanvas, enabled }
-  },
-  imgTools: {
-    files: [],       // Array of { id, name, relPath, canvas, result: {type, canvas?, svg?}, resultLabel }
-    activeId: null,
-    dirHandle: null, // FileSystemDirectoryHandle when a folder was opened (Chrome/Edge)
-    zoom: 1.0,
-    tool: 'upscale', // 'upscale' | 'bgremove' | 'vector' | 'compress'
-    isProcessing: false,
-    brush: {
-      mode: 'erase', // 'erase' | 'restore'
-      size: 40       // brush diameter in image pixels
-    },
-    settings: {
-      upscaleAlgorithm: 'ai',   // 'ai' | 'xbr' | 'smooth' | 'nearest'
-      upscaleAiModel: 'anime-best', // AI_MODELS key ('*-best' = full RRDBNet, others = compact)
-      upscaleScale: 4,
-      upscaleFormat: 'png',     // output encoding for upscale result: 'png' | 'webp'
-      upscaleQuality: 90,       // webp quality 1-100 (ignored for png)
-      bgModel: 'isnet_fp16',    // imgly ISNet variant: 'isnet' | 'isnet_fp16' | 'isnet_quint8'
-      bgFormat: 'png',          // bg-removal output: 'png' | 'webp' (both keep alpha)
-      bgQuality: 90,            // webp quality 1-100 (ignored for png)
-      vectorMode: 'pixel',      // 'pixel' | 'trace'
-      vectorPreset: 'balanced',
-      vectorColors: 6, // vtracer per-channel color precision (1-8)
-      compressFormat: 'webp',   // compress tool output: 'webp' | 'png'
-      compressQuality: 90       // webp quality 1-100
-    }
-  }
-};
-
-// UI Elements
-const els = {
-  dropzone: document.getElementById('dropzone'),
-  fileInput: document.getElementById('file-input'),
-  fileList: document.getElementById('file-list'),
-  
-  modeGrid: document.getElementById('mode-grid'),
-  modeAuto: document.getElementById('mode-auto'),
-  modeCustom: document.getElementById('mode-custom'),
-  settingsGrid: document.getElementById('settings-grid'),
-  settingsAuto: document.getElementById('settings-auto'),
-  settingsCustom: document.getElementById('settings-custom'),
-  
-  // Custom Grid UI elements
-  btnSelectRegion: document.getElementById('btn-select-region'),
-  customRegionX: document.getElementById('custom-region-x'),
-  customRegionY: document.getElementById('custom-region-y'),
-  customRegionW: document.getElementById('custom-region-w'),
-  customRegionH: document.getElementById('custom-region-h'),
-  btnRegionFull: document.getElementById('btn-region-full'),
-  customCols: document.getElementById('custom-cols'),
-  customRows: document.getElementById('custom-rows'),
-  btnResetEqual: document.getElementById('btn-reset-equal'),
-  btnAutoSnap: document.getElementById('btn-auto-snap'),
-  btnSnapKeep: document.getElementById('btn-snap-keep'),
-  
-  // Rematch UI elements
-  optRematch: document.getElementById('opt-rematch'),
-  rematchSettings: document.getElementById('rematch-settings'),
-  rematchMode: document.getElementById('rematch-mode'),
-  rematchCustomSize: document.getElementById('rematch-custom-size'),
-  rematchW: document.getElementById('rematch-w'),
-  rematchH: document.getElementById('rematch-h'),
-  rematchFit: document.getElementById('rematch-fit'),
-  
-  gridW: document.getElementById('grid-w'),
-  gridH: document.getElementById('grid-h'),
-  autoMinW: document.getElementById('auto-min-w'),
-  autoMinH: document.getElementById('auto-min-h'),
-  autoTolerance: document.getElementById('auto-tolerance'),
-  autoRowGap: document.getElementById('auto-row-gap'),
-  autoMergeGap: document.getElementById('auto-merge-gap'),
-  optSkipEmpty: document.getElementById('opt-skip-empty'),
-  optNaming: document.getElementById('opt-naming'),
-  btnDetectGrid: document.getElementById('btn-detect-grid'),
-  btnApplyAll: document.getElementById('btn-apply-all'),
-  
-  optBgRemoval: document.getElementById('opt-bg-removal'),
-  bgRemovalSettings: document.getElementById('bg-removal-settings'),
-  optBgRemovalMethod: document.getElementById('opt-bg-removal-method'),
-  optBgRemovalModelSize: document.getElementById('opt-bg-removal-model-size'),
-  chromakeySettingsGroup: document.getElementById('chromakey-settings-group'),
-  aiSettingsGroup: document.getElementById('ai-settings-group'),
-  bgColor: document.getElementById('bg-color'),
-  btnPickColor: document.getElementById('btn-pick-color'),
-  btnAutoDetectBg: document.getElementById('btn-auto-detect-bg'),
-  bgTolerance: document.getElementById('bg-tolerance'),
-  labelBgTolerance: document.getElementById('label-bg-tolerance'),
-  optBgContiguous: document.getElementById('opt-bg-contiguous'),
-  
-  imageInfo: document.getElementById('image-info'),
-  zoomLevel: document.getElementById('zoom-level'),
-  btnZoomIn: document.getElementById('btn-zoom-in'),
-  btnZoomOut: document.getElementById('btn-zoom-out'),
-  btnZoomFit: document.getElementById('btn-zoom-fit'),
-  btnZoomReset: document.getElementById('btn-zoom-reset'),
-  
-  canvasViewport: document.getElementById('canvas-viewport'),
-  canvasContainer: document.getElementById('canvas-container'),
-  canvas: document.getElementById('slicer-canvas'),
-  loadingOverlay: document.getElementById('loading-overlay'),
-  
-  previewCount: document.getElementById('preview-count'),
-  btnToggleAllSlices: document.getElementById('btn-toggle-all-slices'),
-  previewGrid: document.getElementById('preview-grid'),
-  
-  exportStats: document.getElementById('export-stats'),
-  btnExportActive: document.getElementById('btn-export-active'),
-  btnExportAllBatch: document.getElementById('btn-export-all-batch'),
-  
-  exportProgressContainer: document.getElementById('export-progress-container'),
-  progressStatusText: document.getElementById('progress-status-text'),
-  progressPercent: document.getElementById('progress-percent'),
-  progressFill: document.getElementById('progress-fill'),
-  
-  themeToggle: document.getElementById('btn-theme-toggle'),
-  toastContainer: document.getElementById('toast-container'),
-  
-  tabSlices: document.getElementById('tab-slices'),
-  tabAnimation: document.getElementById('tab-animation'),
-  viewSlices: document.getElementById('view-slices'),
-  viewAnimation: document.getElementById('view-animation'),
-  animCanvas: document.getElementById('anim-canvas'),
-  animNoFramesMsg: document.getElementById('anim-no-frames-msg'),
-  btnAnimPlay: document.getElementById('btn-anim-play'),
-  animFrameIdx: document.getElementById('anim-frame-idx'),
-  animFrameTotal: document.getElementById('anim-frame-total'),
-  animFps: document.getElementById('anim-fps'),
-  labelAnimFps: document.getElementById('label-anim-fps'),
-  btnExportGif: document.getElementById('btn-export-gif'),
-  btnExportWebm: document.getElementById('btn-export-webm'),
-
-  wsBtnSlicer: document.getElementById('ws-btn-slicer'),
-  wsBtnVideo: document.getElementById('ws-btn-video'),
-  slicerSidebarContent: document.getElementById('slicer-sidebar-content'),
-  videoSidebarContent: document.getElementById('video-sidebar-content'),
-  slicerViewportContent: document.getElementById('slicer-viewport-content'),
-  videoViewportContent: document.getElementById('video-viewport-content'),
-  
-  videoDropzone: document.getElementById('video-dropzone'),
-  videoFileInput: document.getElementById('video-file-input'),
-  videoFileInfoContainer: document.getElementById('video-file-info-container'),
-  videoCurrentName: document.getElementById('video-current-name'),
-  videoCurrentMeta: document.getElementById('video-current-meta'),
-  videoIntervalInput: document.getElementById('video-interval-input'),
-  videoOptAllFrames: document.getElementById('video-opt-all-frames'),
-  videoRangeStart: document.getElementById('video-range-start'),
-  videoRangeEnd: document.getElementById('video-range-end'),
-  btnVideoUseFull: document.getElementById('btn-video-use-full'),
-  btnVideoExtract: document.getElementById('btn-video-extract'),
-  
-  wsVideoPlayer: document.getElementById('ws-video-player'),
-  videoFramesGrid: document.getElementById('video-frames-grid'),
-  videoGridPlaceholder: document.getElementById('video-grid-placeholder'),
-  videoToolbarInfo: document.getElementById('video-toolbar-info'),
-  videoTimeDisplay: document.getElementById('video-time-display'),
-  videoOptBgRemoval: document.getElementById('video-opt-bg-removal'),
-  videoBgRemovalSettings: document.getElementById('video-bg-removal-settings'),
-  videoOptBgRemovalMethod: document.getElementById('video-opt-bg-removal-method'),
-  videoOptBgRemovalModelSize: document.getElementById('video-opt-bg-removal-model-size'),
-  videoChromakeySettingsGroup: document.getElementById('video-chromakey-settings-group'),
-  videoAiSettingsGroup: document.getElementById('video-ai-settings-group'),
-  videoBgColor: document.getElementById('video-bg-color'),
-  videoBtnPickColor: document.getElementById('video-btn-pick-color'),
-  videoBtnAutoDetectBg: document.getElementById('video-btn-auto-detect-bg'),
-  videoBgTolerance: document.getElementById('video-bg-tolerance'),
-  videoLabelBgTolerance: document.getElementById('video-label-bg-tolerance'),
-  videoOptBgContiguous: document.getElementById('video-opt-bg-contiguous'),
-  videoLoadingOverlay: document.getElementById('video-loading-overlay'),
-
-  // Image Tools workspace elements
-  wsBtnImgTools: document.getElementById('ws-btn-imgtools'),
-  imgToolsSidebarContent: document.getElementById('imgtools-sidebar-content'),
-  imgToolsViewportContent: document.getElementById('imgtools-viewport-content'),
-  imgToolsDropzone: document.getElementById('imgtools-dropzone'),
-  imgToolsFileInput: document.getElementById('imgtools-file-input'),
-  imgToolsFileList: document.getElementById('imgtools-file-list'),
-  imgToolsModeUpscale: document.getElementById('imgtools-mode-upscale'),
-  imgToolsModeBgRemove: document.getElementById('imgtools-mode-bgremove'),
-  imgToolsModeVector: document.getElementById('imgtools-mode-vector'),
-  imgToolsModeCompress: document.getElementById('imgtools-mode-compress'),
-  imgToolsSettingsUpscale: document.getElementById('imgtools-settings-upscale'),
-  imgToolsSettingsBgRemove: document.getElementById('imgtools-settings-bgremove'),
-  imgToolsSettingsVector: document.getElementById('imgtools-settings-vector'),
-  imgToolsSettingsCompress: document.getElementById('imgtools-settings-compress'),
-  bgremoveModel: document.getElementById('bgremove-model'),
-  bgremoveFormat: document.getElementById('bgremove-format'),
-  bgremoveQualityField: document.getElementById('bgremove-quality-field'),
-  bgremoveQuality: document.getElementById('bgremove-quality'),
-  labelBgremoveQuality: document.getElementById('label-bgremove-quality'),
-  imgToolsBrushToolbar: document.getElementById('imgtools-brush-toolbar'),
-  imgToolsBrushErase: document.getElementById('imgtools-brush-erase'),
-  imgToolsBrushRestore: document.getElementById('imgtools-brush-restore'),
-  imgToolsBrushSize: document.getElementById('imgtools-brush-size'),
-  imgToolsBrushSizeLabel: document.getElementById('imgtools-brush-size-label'),
-  btnImgToolsBrushUndo: document.getElementById('imgtools-brush-undo'),
-  btnImgToolsBrushRedo: document.getElementById('imgtools-brush-redo'),
-  btnImgToolsBrushReset: document.getElementById('imgtools-brush-reset'),
-  imgToolsBrushCursor: document.getElementById('imgtools-brush-cursor'),
-  upscaleAlgorithm: document.getElementById('upscale-algorithm'),
-  upscaleAiModelField: document.getElementById('upscale-ai-model-field'),
-  upscaleAiModel: document.getElementById('upscale-ai-model'),
-  upscaleScale: document.getElementById('upscale-scale'),
-  upscaleFormat: document.getElementById('upscale-format'),
-  upscaleQualityField: document.getElementById('upscale-quality-field'),
-  upscaleQuality: document.getElementById('upscale-quality'),
-  labelUpscaleQuality: document.getElementById('label-upscale-quality'),
-  compressFormat: document.getElementById('compress-format'),
-  compressQualityField: document.getElementById('compress-quality-field'),
-  compressQuality: document.getElementById('compress-quality'),
-  labelCompressQuality: document.getElementById('label-compress-quality'),
-  compressStats: document.getElementById('compress-stats'),
-  vectorMode: document.getElementById('vector-mode'),
-  vectorTraceOptions: document.getElementById('vector-trace-options'),
-  vectorPreset: document.getElementById('vector-preset'),
-  vectorColors: document.getElementById('vector-colors'),
-  labelVectorColors: document.getElementById('label-vector-colors'),
-  btnImgToolsProcess: document.getElementById('btn-imgtools-process'),
-  btnImgToolsProcessAll: document.getElementById('btn-imgtools-process-all'),
-  btnImgToolsDownload: document.getElementById('btn-imgtools-download'),
-  btnImgToolsDownloadAll: document.getElementById('btn-imgtools-download-all'),
-  btnImgToolsOpenFolder: document.getElementById('btn-imgtools-open-folder'),
-  btnImgToolsSaveFolder: document.getElementById('btn-imgtools-save-folder'),
-  imgToolsFolderHint: document.getElementById('imgtools-folder-hint'),
-  imgToolsLoadingOverlay: document.getElementById('imgtools-loading-overlay'),
-  imgToolsLoadingText: document.getElementById('imgtools-loading-text'),
-  imgToolsInfo: document.getElementById('imgtools-info'),
-  imgToolsResultMeta: document.getElementById('imgtools-result-meta'),
-  imgToolsZoomLevel: document.getElementById('imgtools-zoom-level'),
-  btnImgToolsZoomIn: document.getElementById('btn-imgtools-zoom-in'),
-  btnImgToolsZoomOut: document.getElementById('btn-imgtools-zoom-out'),
-  btnImgToolsZoomFit: document.getElementById('btn-imgtools-zoom-fit'),
-  btnImgToolsZoomReset: document.getElementById('btn-imgtools-zoom-reset'),
-  imgToolsPaneOriginal: document.getElementById('imgtools-pane-original'),
-  imgToolsPaneResult: document.getElementById('imgtools-pane-result'),
-  imgToolsOutputContent: document.getElementById('imgtools-output-content'),
-  imgToolsExportSummary: document.getElementById('imgtools-export-summary')
-};
-
-// Canvas Context
-const ctx = els.canvas.getContext('2d');
+import { state, getActiveFile, processingQueue } from './app/state.js';
+import { els, ctx } from './app/dom.js';
+import { debounce, detectCornerColor, encodeCanvasToBlob, formatBytes, downloadBlob } from './app/utils.js';
+import { showToast, showProgressBar, updateProgressBar, setOnProgressHidden } from './app/ui.js';
 
 // Initialize App
 function init() {
   bindEvents();
+  setOnProgressHidden(updateExportStats);
   syncSettingsFromUI();
   updateExportStats();
   updateImgToolsSettingsUI();
@@ -388,15 +76,6 @@ function bindEvents() {
   els.modeGrid.addEventListener('click', () => switchMode('grid'));
   els.modeAuto.addEventListener('click', () => switchMode('auto'));
   els.modeCustom.addEventListener('click', () => switchMode('custom'));
-
-  // Debounce helper to prevent heavy calculations on every keystroke
-  function debounce(func, wait) {
-    let timeout;
-    return function (...args) {
-      clearTimeout(timeout);
-      timeout = setTimeout(() => func.apply(this, args), wait);
-    };
-  }
 
   const debouncedReSlice = debounce(() => {
     syncSettingsFromUI();
@@ -1044,53 +723,6 @@ async function extractVideoRangeFrames() {
     if (els.videoLoadingOverlay) {
       els.videoLoadingOverlay.classList.add('hidden');
     }
-  }
-}
-
-function detectCornerColor(canvas) {
-  try {
-    const ctx = canvas.getContext('2d');
-    const w = canvas.width;
-    const h = canvas.height;
-    if (w <= 0 || h <= 0) return '#00ff00';
-
-    const corners = [
-      ctx.getImageData(0, 0, 1, 1).data,
-      ctx.getImageData(w - 1, 0, 1, 1).data,
-      ctx.getImageData(0, h - 1, 1, 1).data,
-      ctx.getImageData(w - 1, h - 1, 1, 1).data
-    ];
-
-    let bestIdx = 0;
-    let minSumDist = Infinity;
-    for (let i = 0; i < 4; i++) {
-      let sumDist = 0;
-      for (let j = 0; j < 4; j++) {
-        if (i === j) continue;
-        const rDiff = corners[i][0] - corners[j][0];
-        const gDiff = corners[i][1] - corners[j][1];
-        const bDiff = corners[i][2] - corners[j][2];
-        sumDist += Math.sqrt(rDiff * rDiff + gDiff * gDiff + bDiff * bDiff);
-      }
-      if (sumDist < minSumDist) {
-        minSumDist = sumDist;
-        bestIdx = i;
-      }
-    }
-
-    const r = corners[bestIdx][0];
-    const g = corners[bestIdx][1];
-    const b = corners[bestIdx][2];
-
-    const rgbToHex = (r, g, b) => '#' + [r, g, b].map(v => {
-      const hex = v.toString(16);
-      return hex.length === 1 ? '0' + hex : hex;
-    }).join('');
-
-    return rgbToHex(r, g, b);
-  } catch (err) {
-    console.error('Failed to detect corner color:', err);
-    return '#00ff00';
   }
 }
 
@@ -1795,10 +1427,6 @@ function removeFile(fileId) {
   updateExportStats();
 }
 
-function getActiveFile() {
-  return state.files.find(f => f.id === state.activeFileId);
-}
-
 function selectFile(fileId) {
   state.activeFileId = fileId;
 
@@ -1818,7 +1446,6 @@ function selectFile(fileId) {
 // ----------------------------------------------------
 // Slicing Logic Execution
 // ----------------------------------------------------
-let processingQueue = Promise.resolve();
 
 async function processImageBackground(fileObj) {
   const settings = fileObj.settings;
@@ -1829,10 +1456,10 @@ async function processImageBackground(fileObj) {
 
   // Queue background removal processing to prevent concurrent model executions (WebGL context issues)
   const myTurn = new Promise((resolve) => {
-    processingQueue.then(resolve);
+    processingQueue.current.then(resolve);
   });
   let nextResolve;
-  processingQueue = new Promise((resolve) => {
+  processingQueue.current = new Promise((resolve) => {
     nextResolve = resolve;
   });
   await myTurn;
@@ -4160,19 +3787,6 @@ function showImgToolsLoading(show, text) {
   if (text) els.imgToolsLoadingText.textContent = text;
 }
 
-/**
- * Encodes a canvas to a Blob. WebP uses the browser's native encoder
- * (canvas.toBlob 'image/webp') — no dependency needed. quality is 1-100.
- */
-function encodeCanvasToBlob(canvas, format, quality) {
-  const mime = format === 'webp' ? 'image/webp' : 'image/png';
-  const q = format === 'webp' ? Math.max(0.01, Math.min(1, (quality || 90) / 100)) : undefined;
-  return new Promise(resolve => canvas.toBlob(resolve, mime, q));
-}
-
-function formatBytes(n) {
-  return n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${(n / 1024).toFixed(1)} KB`;
-}
 
 async function processImgToolsFile(fileObj) {
   syncImgToolsSettingsFromUI();
@@ -4266,9 +3880,9 @@ async function processImgToolsBgRemoval(fileObj, s, onProgress) {
     onProgress({ label: 'Removing background (AI, local)...' });
 
     // Serialize with slicer/video AI removal to avoid concurrent model runs.
-    const myTurn = new Promise((resolve) => { processingQueue.then(resolve); });
+    const myTurn = new Promise((resolve) => { processingQueue.current.then(resolve); });
     let releaseQueue;
-    processingQueue = new Promise((resolve) => { releaseQueue = resolve; });
+    processingQueue.current = new Promise((resolve) => { releaseQueue = resolve; });
     await myTurn;
 
     try {
@@ -4629,13 +4243,6 @@ function imgToolsZoomToFit() {
   setImgToolsZoom(scale);
 }
 
-function downloadBlob(blob, filename) {
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = filename;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(link.href), 5000);
-}
 
 function imgToolsResultFilename(fileObj) {
   const base = fileObj.name.substring(0, fileObj.name.lastIndexOf('.')) || fileObj.name;
@@ -4802,56 +4409,6 @@ function bindImgToolsEvents() {
   syncScroll(els.imgToolsPaneResult, els.imgToolsPaneOriginal);
 }
 
-// ----------------------------------------------------
-// UI Progress Overlay & Toast Notifications
-// ----------------------------------------------------
-function showProgressBar(show) {
-  if (show) {
-    els.exportProgressContainer.classList.remove('hidden');
-    // Disable primary action buttons during export
-    els.btnExportActive.disabled = true;
-    els.btnExportAllBatch.disabled = true;
-  } else {
-    els.exportProgressContainer.classList.add('hidden');
-    updateExportStats();
-  }
-}
-
-function updateProgressBar(text, percent) {
-  els.progressStatusText.textContent = text;
-  els.progressPercent.textContent = `${percent}%`;
-  els.progressFill.style.width = `${percent}%`;
-}
-
-function showToast(title, message, type = 'info') {
-  const toast = document.createElement('div');
-  toast.className = `toast toast-${type}`;
-  
-  let iconSvg = '';
-  if (type === 'success') {
-    iconSvg = `<svg class="toast-icon" viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2.5" fill="none"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>`;
-  } else if (type === 'error') {
-    iconSvg = `<svg class="toast-icon" viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2.5" fill="none"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>`;
-  } else {
-    iconSvg = `<svg class="toast-icon" viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2.5" fill="none"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>`;
-  }
-
-  toast.innerHTML = `
-    ${iconSvg}
-    <div class="toast-content">
-      <span class="toast-title">${title}</span>
-      <span class="toast-msg">${message}</span>
-    </div>
-  `;
-
-  els.toastContainer.appendChild(toast);
-
-  // Auto remove toast
-  setTimeout(() => {
-    toast.classList.add('removing');
-    toast.addEventListener('transitionend', () => toast.remove());
-  }, 4000);
-}
 
 // Start the Application
 window.addEventListener('DOMContentLoaded', init);

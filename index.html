@@ -33,8 +33,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <!-- CSS -->
-  <script type="module" crossorigin src="./assets/index-D0HIRX_y.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-C-reg6p-.css">
+  <script type="module" crossorigin src="./assets/index-C4ol8RIu.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-DcGTIE0W.css">
 </head>
 <body class="dark-theme">
   <!-- Background Ambient Glows -->
@@ -365,8 +365,9 @@
                   <div class="input-field">
                     <label for="opt-bg-removal-model-size">AI Model Quality</label>
                     <select id="opt-bg-removal-model-size" style="width: 100%;">
-                      <option value="medium">Medium (Better, ~38MB)</option>
-                      <option value="small">Small (Faster, ~17MB)</option>
+                      <option value="medium">Medium (Better, ~88MB)</option>
+                      <option value="large">Large (Best Quality, ~176MB)</option>
+                      <option value="small">Small (Faster, ~44MB)</option>
                     </select>
                   </div>
                 </div>
@@ -518,8 +519,9 @@
                   <div class="input-field">
                     <label for="video-opt-bg-removal-model-size">AI Model Quality</label>
                     <select id="video-opt-bg-removal-model-size" style="width: 100%;">
-                      <option value="medium">Medium (Better, ~38MB)</option>
-                      <option value="small">Small (Faster, ~17MB)</option>
+                      <option value="medium">Medium (Better, ~88MB)</option>
+                      <option value="large">Large (Best Quality, ~176MB)</option>
+                      <option value="small">Small (Faster, ~44MB)</option>
                     </select>
                   </div>
                 </div>
@@ -554,7 +556,7 @@
               <div class="drop-text">
                 <strong>Drag & Drop PNGs</strong> or <span class="browse-link">Browse Files</span>
               </div>
-              <div class="drop-subtext">Upscale or vectorize multiple images</div>
+              <div class="drop-subtext">Upscale, cut backgrounds, vectorize or compress</div>
             </div>
 
             <button id="btn-imgtools-open-folder" class="btn btn-secondary w-full hidden" style="margin-top: 10px; padding: 8px 16px;">
@@ -580,6 +582,7 @@
               <label class="control-label">Tool</label>
               <div class="segmented-control">
                 <button id="imgtools-mode-upscale" class="control-btn active" data-tool="upscale">Upscale</button>
+                <button id="imgtools-mode-bgremove" class="control-btn" data-tool="bgremove">Cut BG</button>
                 <button id="imgtools-mode-vector" class="control-btn" data-tool="vector">Vectorize</button>
                 <button id="imgtools-mode-compress" class="control-btn" data-tool="compress">Compress</button>
               </div>
@@ -660,6 +663,44 @@
                 💡 <b>Pixel Perfect</b> reproduces every pixel exactly as vector rectangles —
                 infinite zoom with zero blur. <b>Smooth Trace</b> fits bezier curves for a
                 clean scalable illustration look.
+              </div>
+            </div>
+
+            <!-- Background Removal Settings -->
+            <div id="imgtools-settings-bgremove" class="mode-settings-panel hidden">
+              <div class="input-field" style="margin-bottom: 8px;">
+                <label for="bgremove-model">AI Model</label>
+                <select id="bgremove-model" style="width: 100%;">
+                  <optgroup label="Bundled — instant, fully offline">
+                    <option value="isnet_fp16" selected>Standard (ISNet FP16, ~88MB)</option>
+                    <option value="isnet">High (ISNet Full, ~176MB)</option>
+                    <option value="isnet_quint8">Fast (ISNet Quantized, ~44MB)</option>
+                  </optgroup>
+                  <optgroup label="Advanced — downloads once, then cached">
+                    <option value="toonout">Anime / Game Art ★ ToonOut (470MB, GPU)</option>
+                    <option value="anime-isnet">Anime / Game Art — ISNet-Anime (168MB)</option>
+                    <option value="rmbg14">Photo / Product — RMBG-1.4 (176MB)</option>
+                  </optgroup>
+                </select>
+              </div>
+              <div class="input-field" style="margin-bottom: 8px;">
+                <label for="bgremove-format">Output Format</label>
+                <select id="bgremove-format" style="width: 100%;">
+                  <option value="png" selected>PNG (Lossless + Alpha)</option>
+                  <option value="webp">WebP (Smaller, keeps Alpha)</option>
+                </select>
+              </div>
+              <div id="bgremove-quality-field" class="input-field hidden">
+                <label for="bgremove-quality" id="label-bgremove-quality">WebP Quality (90)</label>
+                <input type="range" id="bgremove-quality" min="1" max="100" value="90" style="accent-color: var(--primary); width: 100%; height: 28px; background: transparent; cursor: pointer;">
+              </div>
+              <div class="custom-grid-hint" style="margin-top: 8px; font-size: 10px; opacity: 0.55; line-height: 1.5;">
+                💡 All inference runs 100% locally — images never leave your machine.
+                After processing, use the <b>Erase / Restore brush</b> above the result
+                pane to touch up spots the AI missed. <b>★ ToonOut</b> has the best
+                edges for anime/game art (needs a WebGPU browser: Chrome/Edge with a
+                GPU). Advanced models download once from Hugging Face, then work
+                offline. RMBG-1.4 is for non-commercial use.
               </div>
             </div>
 
@@ -813,6 +854,31 @@
             </div>
             <div class="imgtools-pane-col imgtools-pane-col--result">
               <div class="imgtools-pane-header">Result</div>
+              <!-- BG-removal brush refinement toolbar (visible for Cut BG results) -->
+              <div id="imgtools-brush-toolbar" class="imgtools-brush-toolbar hidden">
+                <div class="segmented-control imgtools-brush-seg">
+                  <button id="imgtools-brush-erase" class="control-btn active" title="Brush away leftover background">
+                    <svg viewBox="0 0 24 24" width="13" height="13" stroke="currentColor" stroke-width="2" fill="none" style="vertical-align: -2px; margin-right: 4px;"><path d="M20 20H7L3 16a1.4 1.4 0 0 1 0-2L13 4a1.4 1.4 0 0 1 2 0l6 6a1.4 1.4 0 0 1 0 2l-8 8"></path></svg>Erase
+                  </button>
+                  <button id="imgtools-brush-restore" class="control-btn" title="Brush back the original pixels">
+                    <svg viewBox="0 0 24 24" width="13" height="13" stroke="currentColor" stroke-width="2" fill="none" style="vertical-align: -2px; margin-right: 4px;"><path d="M12 19l7-7 3 3-7 7-3-3z"></path><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"></path></svg>Restore
+                  </button>
+                </div>
+                <div class="imgtools-brush-size-field">
+                  <span>Size</span>
+                  <input type="range" id="imgtools-brush-size" min="4" max="200" value="40">
+                  <span id="imgtools-brush-size-label">40</span>
+                </div>
+                <div class="imgtools-brush-actions">
+                  <button id="imgtools-brush-undo" class="btn-icon-sm" title="Undo brush stroke (Ctrl+Z)" disabled>
+                    <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
+                  </button>
+                  <button id="imgtools-brush-redo" class="btn-icon-sm" title="Redo brush stroke (Ctrl+Y)" disabled>
+                    <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.13-9.36L23 10"></path></svg>
+                  </button>
+                  <button id="imgtools-brush-reset" class="btn-text-sm" title="Discard all brush edits and go back to the AI result">Reset</button>
+                </div>
+              </div>
               <div id="imgtools-pane-result" class="imgtools-pane imgtools-checker">
                 <div class="no-sprites-msg" id="imgtools-result-placeholder" style="border: none; background: transparent; padding: 60px 20px;">Process the image to see the result.</div>
               </div>
@@ -976,6 +1042,9 @@
 
   <!-- Toast Notification System -->
   <div class="toast-container" id="toast-container"></div>
+
+  <!-- BG-removal brush cursor preview (follows pointer over the result pane) -->
+  <div id="imgtools-brush-cursor" class="imgtools-brush-cursor hidden"></div>
 
   <!-- JavaScript Entry Point -->
 </body>

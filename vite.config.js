@@ -13,6 +13,11 @@ export default defineConfig({
     outDir: 'dist',
     assetsDir: 'assets',
   },
+  worker: {
+    // The BG-segmentation worker dynamically imports onnxruntime-web, which
+    // needs code-splitting — only the ES output format supports that.
+    format: 'es',
+  },
   server: {
     headers: {
       'Cross-Origin-Opener-Policy': 'same-origin',

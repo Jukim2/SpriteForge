@@ -4,6 +4,7 @@ import { sliceGrid, sliceAuto, sliceCustomGrid, isRegionEmpty, detectGridSize } 
 import { applyChromaKey, chromaKeyCanvas } from './chromakey.js';
 import { extractFrames, resolveVideoDuration } from './videoExtractor.js';
 import { upscaleImage, AI_MODELS, getAiBackend } from './upscaler.js';
+import { segmentBackground, isSegModel, BG_SEG_MODELS } from './bgSegmenter.js';
 import { vectorizeImage, svgToDataUrl } from './vectorizer.js';
 
 // Application State
@@ -29,7 +30,7 @@ const state = {
     namingTemplate: 'sprite_{row}_{col}',
     enableBgRemoval: false,
     bgRemovalMethod: 'chromakey', // 'chromakey' or 'ai'
-    bgRemovalModelSize: 'medium', // 'small' or 'medium'
+    bgRemovalModelSize: 'medium', // 'small' | 'medium' | 'large'
     bgColor: '#00ff00',
     bgTolerance: 15,
     bgContiguous: true,
@@ -76,7 +77,7 @@ const state = {
     endRange: 0.0,
     enableBgRemoval: false,
     bgRemovalMethod: 'chromakey', // 'chromakey' or 'ai'
-    bgRemovalModelSize: 'medium', // 'small' or 'medium'
+    bgRemovalModelSize: 'medium', // 'small' | 'medium' | 'large'
     bgColor: '#00ff00',
     bgTolerance: 15,
     bgContiguous: true,
@@ -87,14 +88,21 @@ const state = {
     activeId: null,
     dirHandle: null, // FileSystemDirectoryHandle when a folder was opened (Chrome/Edge)
     zoom: 1.0,
-    tool: 'upscale', // 'upscale' | 'vector' | 'compress'
+    tool: 'upscale', // 'upscale' | 'bgremove' | 'vector' | 'compress'
     isProcessing: false,
+    brush: {
+      mode: 'erase', // 'erase' | 'restore'
+      size: 40       // brush diameter in image pixels
+    },
     settings: {
       upscaleAlgorithm: 'ai',   // 'ai' | 'xbr' | 'smooth' | 'nearest'
       upscaleAiModel: 'anime-best', // AI_MODELS key ('*-best' = full RRDBNet, others = compact)
       upscaleScale: 4,
       upscaleFormat: 'png',     // output encoding for upscale result: 'png' | 'webp'
       upscaleQuality: 90,       // webp quality 1-100 (ignored for png)
+      bgModel: 'isnet_fp16',    // imgly ISNet variant: 'isnet' | 'isnet_fp16' | 'isnet_quint8'
+      bgFormat: 'png',          // bg-removal output: 'png' | 'webp' (both keep alpha)
+      bgQuality: 90,            // webp quality 1-100 (ignored for png)
       vectorMode: 'pixel',      // 'pixel' | 'trace'
       vectorPreset: 'balanced',
       vectorColors: 6, // vtracer per-channel color precision (1-8)
@@ -252,11 +260,27 @@ const els = {
   imgToolsFileInput: document.getElementById('imgtools-file-input'),
   imgToolsFileList: document.getElementById('imgtools-file-list'),
   imgToolsModeUpscale: document.getElementById('imgtools-mode-upscale'),
+  imgToolsModeBgRemove: document.getElementById('imgtools-mode-bgremove'),
   imgToolsModeVector: document.getElementById('imgtools-mode-vector'),
   imgToolsModeCompress: document.getElementById('imgtools-mode-compress'),
   imgToolsSettingsUpscale: document.getElementById('imgtools-settings-upscale'),
+  imgToolsSettingsBgRemove: document.getElementById('imgtools-settings-bgremove'),
   imgToolsSettingsVector: document.getElementById('imgtools-settings-vector'),
   imgToolsSettingsCompress: document.getElementById('imgtools-settings-compress'),
+  bgremoveModel: document.getElementById('bgremove-model'),
+  bgremoveFormat: document.getElementById('bgremove-format'),
+  bgremoveQualityField: document.getElementById('bgremove-quality-field'),
+  bgremoveQuality: document.getElementById('bgremove-quality'),
+  labelBgremoveQuality: document.getElementById('label-bgremove-quality'),
+  imgToolsBrushToolbar: document.getElementById('imgtools-brush-toolbar'),
+  imgToolsBrushErase: document.getElementById('imgtools-brush-erase'),
+  imgToolsBrushRestore: document.getElementById('imgtools-brush-restore'),
+  imgToolsBrushSize: document.getElementById('imgtools-brush-size'),
+  imgToolsBrushSizeLabel: document.getElementById('imgtools-brush-size-label'),
+  btnImgToolsBrushUndo: document.getElementById('imgtools-brush-undo'),
+  btnImgToolsBrushRedo: document.getElementById('imgtools-brush-redo'),
+  btnImgToolsBrushReset: document.getElementById('imgtools-brush-reset'),
+  imgToolsBrushCursor: document.getElementById('imgtools-brush-cursor'),
   upscaleAlgorithm: document.getElementById('upscale-algorithm'),
   upscaleAiModelField: document.getElementById('upscale-ai-model-field'),
   upscaleAiModel: document.getElementById('upscale-ai-model'),
@@ -3842,6 +3866,9 @@ function syncImgToolsSettingsFromUI() {
   s.upscaleScale = parseInt(els.upscaleScale.value) || 4;
   s.upscaleFormat = els.upscaleFormat.value;
   s.upscaleQuality = parseInt(els.upscaleQuality.value) || 90;
+  s.bgModel = els.bgremoveModel.value;
+  s.bgFormat = els.bgremoveFormat.value;
+  s.bgQuality = parseInt(els.bgremoveQuality.value) || 90;
   s.vectorMode = els.vectorMode.value;
   s.vectorPreset = els.vectorPreset.value;
   s.vectorColors = parseInt(els.vectorColors.value) || 6;
@@ -3852,9 +3879,11 @@ function syncImgToolsSettingsFromUI() {
 function updateImgToolsSettingsUI() {
   const tool = state.imgTools.tool;
   els.imgToolsModeUpscale.classList.toggle('active', tool === 'upscale');
+  els.imgToolsModeBgRemove.classList.toggle('active', tool === 'bgremove');
   els.imgToolsModeVector.classList.toggle('active', tool === 'vector');
   els.imgToolsModeCompress.classList.toggle('active', tool === 'compress');
   els.imgToolsSettingsUpscale.classList.toggle('hidden', tool !== 'upscale');
+  els.imgToolsSettingsBgRemove.classList.toggle('hidden', tool !== 'bgremove');
   els.imgToolsSettingsVector.classList.toggle('hidden', tool !== 'vector');
   els.imgToolsSettingsCompress.classList.toggle('hidden', tool !== 'compress');
 
@@ -3863,6 +3892,7 @@ function updateImgToolsSettingsUI() {
   // Quality sliders only apply to lossy WebP output.
   els.upscaleQualityField.classList.toggle('hidden', els.upscaleFormat.value !== 'webp');
   els.compressQualityField.classList.toggle('hidden', els.compressFormat.value !== 'webp');
+  els.bgremoveQualityField.classList.toggle('hidden', els.bgremoveFormat.value !== 'webp');
 
   // xBR only supports integer 2-4x; all current scale options are valid.
   updateImgToolsButtons();
@@ -4175,6 +4205,8 @@ async function processImgToolsFile(fileObj) {
     fileObj.result = { type: 'raster', canvas: resultCanvas, format: fmt, quality: s.upscaleQuality, blob, bytes: blob.size };
     fileObj.resultLabel = `${algoLabels[s.upscaleAlgorithm] || s.upscaleAlgorithm} ${s.upscaleScale}x → ${resultCanvas.width}x${resultCanvas.height}px · ${fmt.toUpperCase()}${qLabel} ${formatBytes(blob.size)}${backend}`;
     fileObj.resultSuffix = `_${s.upscaleAlgorithm}_x${s.upscaleScale}`;
+  } else if (state.imgTools.tool === 'bgremove') {
+    await processImgToolsBgRemoval(fileObj, s, onProgress);
   } else {
     const svg = await vectorizeImage(fileObj.canvas, {
       mode: s.vectorMode,
@@ -4187,6 +4219,299 @@ async function processImgToolsFile(fileObj) {
     fileObj.resultLabel = `SVG ${s.vectorMode === 'pixel' ? 'Pixel Perfect' : `Trace (${s.vectorPreset})`} • ${kb} KB`;
     fileObj.resultSuffix = `_${s.vectorMode === 'pixel' ? 'pixel' : 'trace'}`;
   }
+}
+
+// ----------------------------------------------------
+// Image Tools: AI Background Removal + Brush Refinement
+// ----------------------------------------------------
+// The AI (imgly ISNet, fully local) produces an alpha mask. The result is
+// always composed as: original pixels × mask alpha. Brush strokes edit the
+// mask only (erase = punch alpha out, restore = paint alpha back), so
+// restoring always brings back the untouched original pixels — Canva-style.
+
+const BG_MODEL_LABELS = { isnet: 'Best', isnet_fp16: 'Standard', isnet_quint8: 'Fast' };
+const BG_UNDO_LIMIT = 30;
+
+// Resolved once per session: 'gpu' when WebGPU inference works, else 'cpu'.
+let bgRemovalDevice = null;
+
+async function runImglyRemoveBackground(srcCanvas, model, onAssetProgress) {
+  const { removeBackground } = await import('@imgly/background-removal');
+  const srcBlob = await new Promise(r => srcCanvas.toBlob(r, 'image/png'));
+  const baseCfg = {
+    model,
+    publicPath: new URL('resources/', window.location.href).href,
+    progress: onAssetProgress
+  };
+  const devices = bgRemovalDevice ? [bgRemovalDevice] : (navigator.gpu ? ['gpu', 'cpu'] : ['cpu']);
+  let lastErr;
+  for (const device of devices) {
+    try {
+      const blob = await removeBackground(srcBlob, { ...baseCfg, device });
+      bgRemovalDevice = device;
+      return blob;
+    } catch (err) {
+      lastErr = err;
+      console.warn(`BG removal on '${device}' failed${device !== devices[devices.length - 1] ? ', falling back' : ''}:`, err);
+    }
+  }
+  throw lastErr;
+}
+
+async function processImgToolsBgRemoval(fileObj, s, onProgress) {
+  const model = s.bgModel;
+  // The raw AI mask is cached per file+model; reprocessing only re-runs
+  // inference when the model changed. Brush edits always start fresh.
+  if (!fileObj.bgAiMask || fileObj.bgAiModel !== model) {
+    onProgress({ label: 'Removing background (AI, local)...' });
+
+    // Serialize with slicer/video AI removal to avoid concurrent model runs.
+    const myTurn = new Promise((resolve) => { processingQueue.then(resolve); });
+    let releaseQueue;
+    processingQueue = new Promise((resolve) => { releaseQueue = resolve; });
+    await myTurn;
+
+    try {
+      if (isSegModel(model)) {
+        // Advanced ONNX segmenter (ISNet-Anime / ToonOut / BiRefNet / RMBG),
+        // downloaded once from Hugging Face and cached locally.
+        const { mask, backend } = await segmentBackground(fileObj.canvas, model, ({ label }) => {
+          showImgToolsLoading(true, `${fileObj.name}: ${label}`);
+        });
+        fileObj.bgAiMask = mask;
+        fileObj.bgAiDevice = backend === 'webgpu' ? 'WebGPU' : 'CPU';
+      } else {
+        // Bundled imgly ISNet pipeline (works fully offline).
+        const blob = await runImglyRemoveBackground(fileObj.canvas, model, (key, current, total) => {
+          const pct = total ? Math.round((current / total) * 100) : 0;
+          showImgToolsLoading(true, `${fileObj.name}: loading AI model (${key}) ${pct}%`);
+        });
+        const img = new Image();
+        img.src = URL.createObjectURL(blob);
+        await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = reject; });
+        URL.revokeObjectURL(img.src);
+
+        const mask = document.createElement('canvas');
+        mask.width = fileObj.canvas.width;
+        mask.height = fileObj.canvas.height;
+        mask.getContext('2d').drawImage(img, 0, 0, mask.width, mask.height);
+        fileObj.bgAiMask = mask;
+        fileObj.bgAiDevice = bgRemovalDevice === 'gpu' ? 'WebGPU' : 'CPU';
+      }
+      fileObj.bgAiModel = model;
+    } finally {
+      releaseQueue();
+    }
+  }
+
+  // Working mask = editable copy of the AI mask; history starts clean.
+  const work = document.createElement('canvas');
+  work.width = fileObj.bgAiMask.width;
+  work.height = fileObj.bgAiMask.height;
+  work.getContext('2d').drawImage(fileObj.bgAiMask, 0, 0);
+  fileObj.bgMask = work;
+  fileObj.bgUndo = [];
+  fileObj.bgRedo = [];
+
+  fileObj.result = {
+    type: 'raster',
+    canvas: document.createElement('canvas'),
+    format: s.bgFormat,
+    quality: s.bgQuality,
+    bgEditable: true
+  };
+  composeBgRemovalResult(fileObj);
+  await refreshBgResultBlob(fileObj);
+  fileObj.resultSuffix = '_nobg';
+}
+
+// Re-derive the result canvas from original pixels × current mask alpha.
+function composeBgRemovalResult(fileObj) {
+  const src = fileObj.canvas;
+  const out = fileObj.result.canvas;
+  out.width = src.width;
+  out.height = src.height;
+  const c = out.getContext('2d');
+  c.drawImage(src, 0, 0);
+  c.globalCompositeOperation = 'destination-in';
+  c.drawImage(fileObj.bgMask, 0, 0);
+  c.globalCompositeOperation = 'source-over';
+}
+
+async function refreshBgResultBlob(fileObj) {
+  const r = fileObj.result;
+  const blob = await encodeCanvasToBlob(r.canvas, r.format, r.quality);
+  r.blob = blob;
+  r.bytes = blob.size;
+  const modelLabel = BG_SEG_MODELS[fileObj.bgAiModel]?.shortLabel
+    || BG_MODEL_LABELS[fileObj.bgAiModel]
+    || fileObj.bgAiModel;
+  const device = fileObj.bgAiDevice || (bgRemovalDevice === 'gpu' ? 'WebGPU' : 'CPU');
+  const qLabel = r.format === 'webp' ? ` q${r.quality}` : '';
+  const edited = (fileObj.bgUndo && fileObj.bgUndo.length > 0) ? ' · brush edited' : '';
+  fileObj.resultLabel = `BG Removed (${modelLabel} · ${device})${edited} · ${r.format.toUpperCase()}${qLabel} ${formatBytes(blob.size)}`;
+}
+
+// True when the active file's result can be brush-edited right now.
+function bgBrushActive() {
+  const f = getActiveImgToolsFile();
+  return !!(state.imgTools.tool === 'bgremove' && f && f.result && f.result.bgEditable && f.bgMask);
+}
+
+function copyMaskCanvas(mask) {
+  const snap = document.createElement('canvas');
+  snap.width = mask.width;
+  snap.height = mask.height;
+  snap.getContext('2d').drawImage(mask, 0, 0);
+  return snap;
+}
+
+// Snapshot the mask before a stroke so it can be undone.
+function bgBrushSnapshot(fileObj) {
+  fileObj.bgUndo.push(copyMaskCanvas(fileObj.bgMask));
+  if (fileObj.bgUndo.length > BG_UNDO_LIMIT) fileObj.bgUndo.shift();
+  fileObj.bgRedo = [];
+}
+
+function bgBrushStroke(fileObj, x0, y0, x1, y1) {
+  const c = fileObj.bgMask.getContext('2d');
+  const erase = state.imgTools.brush.mode === 'erase';
+  c.globalCompositeOperation = erase ? 'destination-out' : 'source-over';
+  c.strokeStyle = '#fff';
+  c.lineWidth = state.imgTools.brush.size;
+  c.lineCap = 'round';
+  c.lineJoin = 'round';
+  c.beginPath();
+  c.moveTo(x0, y0);
+  // A zero-length path draws nothing; nudge so a click stamps a dot.
+  c.lineTo(x1 + (x1 === x0 && y1 === y0 ? 0.01 : 0), y1);
+  c.stroke();
+  c.globalCompositeOperation = 'source-over';
+  composeBgRemovalResult(fileObj);
+}
+
+function bgBrushUndo() {
+  const f = getActiveImgToolsFile();
+  if (!bgBrushActive() || f.bgUndo.length === 0) return;
+  f.bgRedo.push(f.bgMask);
+  f.bgMask = f.bgUndo.pop();
+  bgBrushAfterEdit(f);
+}
+
+function bgBrushRedo() {
+  const f = getActiveImgToolsFile();
+  if (!bgBrushActive() || f.bgRedo.length === 0) return;
+  f.bgUndo.push(f.bgMask);
+  f.bgMask = f.bgRedo.pop();
+  bgBrushAfterEdit(f);
+}
+
+function bgBrushReset() {
+  const f = getActiveImgToolsFile();
+  if (!bgBrushActive() || !f.bgAiMask) return;
+  bgBrushSnapshot(f);
+  f.bgMask = copyMaskCanvas(f.bgAiMask);
+  bgBrushAfterEdit(f);
+}
+
+function bgBrushAfterEdit(fileObj) {
+  composeBgRemovalResult(fileObj);
+  redrawBgResultView(fileObj);
+  scheduleBgBlobRefresh(fileObj);
+  updateBrushToolbar();
+}
+
+// The live <canvas> element showing the result in the compare pane.
+let bgResultViewCanvas = null;
+
+function redrawBgResultView(fileObj) {
+  if (!bgResultViewCanvas) return;
+  const c = bgResultViewCanvas.getContext('2d');
+  c.clearRect(0, 0, bgResultViewCanvas.width, bgResultViewCanvas.height);
+  c.drawImage(fileObj.result.canvas, 0, 0);
+}
+
+// Debounced re-encode after brush edits keeps download/export in sync
+// without paying the PNG encode cost on every stroke.
+let bgBlobRefreshTimer = null;
+function scheduleBgBlobRefresh(fileObj) {
+  clearTimeout(bgBlobRefreshTimer);
+  bgBlobRefreshTimer = setTimeout(async () => {
+    await refreshBgResultBlob(fileObj);
+    if (getActiveImgToolsFile() === fileObj) {
+      els.imgToolsResultMeta.textContent = fileObj.resultLabel;
+      updateImgToolsButtons();
+    }
+  }, 300);
+}
+
+function updateBrushToolbar() {
+  const active = bgBrushActive();
+  els.imgToolsBrushToolbar.classList.toggle('hidden', !active);
+  if (!active) {
+    els.imgToolsBrushCursor.classList.add('hidden');
+    return;
+  }
+  const f = getActiveImgToolsFile();
+  els.imgToolsBrushErase.classList.toggle('active', state.imgTools.brush.mode === 'erase');
+  els.imgToolsBrushRestore.classList.toggle('active', state.imgTools.brush.mode === 'restore');
+  els.btnImgToolsBrushUndo.disabled = f.bgUndo.length === 0;
+  els.btnImgToolsBrushRedo.disabled = f.bgRedo.length === 0;
+}
+
+function attachBgBrushEvents(view, fileObj) {
+  let drawing = false;
+  let last = null;
+
+  const toMaskCoords = (e) => {
+    const rect = view.getBoundingClientRect();
+    return {
+      x: (e.clientX - rect.left) * (view.width / rect.width),
+      y: (e.clientY - rect.top) * (view.height / rect.height)
+    };
+  };
+
+  const moveCursor = (e) => {
+    const rect = view.getBoundingClientRect();
+    const d = state.imgTools.brush.size * (rect.width / view.width);
+    const cur = els.imgToolsBrushCursor;
+    cur.style.width = `${d}px`;
+    cur.style.height = `${d}px`;
+    cur.style.left = `${e.clientX - d / 2}px`;
+    cur.style.top = `${e.clientY - d / 2}px`;
+    cur.classList.toggle('restore', state.imgTools.brush.mode === 'restore');
+    cur.classList.remove('hidden');
+  };
+
+  view.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    view.setPointerCapture(e.pointerId);
+    drawing = true;
+    bgBrushSnapshot(fileObj);
+    last = toMaskCoords(e);
+    bgBrushStroke(fileObj, last.x, last.y, last.x, last.y);
+    redrawBgResultView(fileObj);
+    updateBrushToolbar();
+  });
+  view.addEventListener('pointermove', (e) => {
+    moveCursor(e);
+    if (!drawing) return;
+    const p = toMaskCoords(e);
+    bgBrushStroke(fileObj, last.x, last.y, p.x, p.y);
+    last = p;
+    redrawBgResultView(fileObj);
+  });
+  const endStroke = () => {
+    if (!drawing) return;
+    drawing = false;
+    scheduleBgBlobRefresh(fileObj);
+  };
+  view.addEventListener('pointerup', endStroke);
+  view.addEventListener('pointercancel', endStroke);
+  view.addEventListener('pointerleave', () => {
+    if (!drawing) els.imgToolsBrushCursor.classList.add('hidden');
+  });
 }
 
 async function imgToolsProcess(filesToProcess) {
@@ -4229,8 +4554,10 @@ function renderImgToolsView() {
   // Original pane
   els.imgToolsPaneOriginal.innerHTML = '';
   els.imgToolsPaneResult.innerHTML = '';
+  bgResultViewCanvas = null;
 
   if (!activeFile) {
+    updateBrushToolbar();
     els.imgToolsPaneOriginal.innerHTML = '<div class="no-sprites-msg" style="border: none; background: transparent; padding: 60px 20px;">Load an image to begin.</div>';
     els.imgToolsPaneResult.innerHTML = '<div class="no-sprites-msg" style="border: none; background: transparent; padding: 60px 20px;">Process the image to see the result.</div>';
     els.imgToolsInfo.textContent = 'No image loaded';
@@ -4265,6 +4592,11 @@ function renderImgToolsView() {
       resView.height = activeFile.result.canvas.height;
       resView.getContext('2d').drawImage(activeFile.result.canvas, 0, 0);
       els.imgToolsPaneResult.appendChild(wrapEl(resView));
+      bgResultViewCanvas = resView;
+      if (state.imgTools.tool === 'bgremove' && activeFile.result.bgEditable && activeFile.bgMask) {
+        resView.classList.add('bg-brush-target');
+        attachBgBrushEvents(resView, activeFile);
+      }
     } else {
       const img = document.createElement('img');
       img.src = svgToDataUrl(activeFile.result.svg);
@@ -4278,6 +4610,7 @@ function renderImgToolsView() {
 
   els.imgToolsInfo.textContent = `${activeFile.name} (${activeFile.canvas.width}x${activeFile.canvas.height}px)`;
   els.imgToolsZoomLevel.textContent = `${Math.round(zoom * 100)}%`;
+  updateBrushToolbar();
   updateImgToolsButtons();
 }
 
@@ -4366,19 +4699,16 @@ function bindImgToolsEvents() {
     if (e.dataTransfer.files.length > 0) handleImgToolsFiles(e.dataTransfer.files);
   });
 
-  // Tool switch
-  els.imgToolsModeUpscale.addEventListener('click', () => {
-    state.imgTools.tool = 'upscale';
+  // Tool switch (re-render so the brush toolbar/handlers follow the tool)
+  const setImgTool = (tool) => {
+    state.imgTools.tool = tool;
     updateImgToolsSettingsUI();
-  });
-  els.imgToolsModeVector.addEventListener('click', () => {
-    state.imgTools.tool = 'vector';
-    updateImgToolsSettingsUI();
-  });
-  els.imgToolsModeCompress.addEventListener('click', () => {
-    state.imgTools.tool = 'compress';
-    updateImgToolsSettingsUI();
-  });
+    renderImgToolsView();
+  };
+  els.imgToolsModeUpscale.addEventListener('click', () => setImgTool('upscale'));
+  els.imgToolsModeBgRemove.addEventListener('click', () => setImgTool('bgremove'));
+  els.imgToolsModeVector.addEventListener('click', () => setImgTool('vector'));
+  els.imgToolsModeCompress.addEventListener('click', () => setImgTool('compress'));
 
   // Settings
   els.upscaleAlgorithm.addEventListener('change', updateImgToolsSettingsUI);
@@ -4393,6 +4723,44 @@ function bindImgToolsEvents() {
   els.vectorMode.addEventListener('change', updateImgToolsSettingsUI);
   els.vectorColors.addEventListener('input', (e) => {
     els.labelVectorColors.textContent = `Color Detail (${e.target.value}/8)`;
+  });
+  els.bgremoveFormat.addEventListener('change', updateImgToolsSettingsUI);
+  els.bgremoveQuality.addEventListener('input', (e) => {
+    els.labelBgremoveQuality.textContent = `WebP Quality (${e.target.value})`;
+  });
+
+  // BG-removal brush refinement toolbar
+  els.imgToolsBrushErase.addEventListener('click', () => {
+    state.imgTools.brush.mode = 'erase';
+    updateBrushToolbar();
+  });
+  els.imgToolsBrushRestore.addEventListener('click', () => {
+    state.imgTools.brush.mode = 'restore';
+    updateBrushToolbar();
+  });
+  els.imgToolsBrushSize.addEventListener('input', (e) => {
+    state.imgTools.brush.size = parseInt(e.target.value) || 40;
+    els.imgToolsBrushSizeLabel.textContent = e.target.value;
+  });
+  els.btnImgToolsBrushUndo.addEventListener('click', bgBrushUndo);
+  els.btnImgToolsBrushRedo.addEventListener('click', bgBrushRedo);
+  els.btnImgToolsBrushReset.addEventListener('click', bgBrushReset);
+
+  // Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) for brush strokes, scoped to the
+  // Image Tools workspace with an editable BG-removal result.
+  document.addEventListener('keydown', (e) => {
+    if (state.workspaceMode !== 'imgtools' || !bgBrushActive()) return;
+    const tag = (e.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+    if (!(e.ctrlKey || e.metaKey)) return;
+    const key = e.key.toLowerCase();
+    if (key === 'z' && !e.shiftKey) {
+      e.preventDefault();
+      bgBrushUndo();
+    } else if (key === 'y' || (key === 'z' && e.shiftKey)) {
+      e.preventDefault();
+      bgBrushRedo();
+    }
   });
 
   // Process actions

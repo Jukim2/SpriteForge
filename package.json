@@ -10,7 +10,9 @@
     "batch": "node scripts/sf-batch.mjs"
   },
   "devDependencies": {
+    "mp4box": "^2.4.1",
     "onnxruntime-node": "^1.27.0",
+    "playwright": "^1.61.1",
     "sharp": "^0.35.3",
     "vite": "^5.2.11"
   },
@@ -19,6 +21,7 @@
     "coi-serviceworker": "^0.1.7",
     "gifshot": "^0.4.5",
     "jszip": "^3.10.1",
+    "mediabunny": "^1.50.6",
     "onnxruntime-web": "^1.27.0",
     "pica": "^10.0.2",
     "vtracer-webapp": "^0.4.0",

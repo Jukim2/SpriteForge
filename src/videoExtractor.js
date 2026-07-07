@@ -1,7 +1,16 @@
 /**
  * Video Frame Extraction Engine
  *
- * Two strategies, both frame-accurate:
+ * Fast path — WebCodecs. MP4/MOV/WebM/MKV files are demuxed with mediabunny
+ * and decoded through VideoDecoder, so frames come out as fast as the decoder
+ * can run (typically 10-50x realtime) instead of waiting on playback or
+ * per-frame seeks. Interval extraction decodes each packet at most once and
+ * seeks by keyframe, so sparse intervals stay cheap. Rotation metadata, pixel
+ * aspect ratio, and alpha (transparent WebM) are honored, matching what a
+ * <video> element would display.
+ *
+ * Fallback path — <video> element capture, used for unrecognized containers,
+ * browsers without WebCodecs, or codecs the decoder rejects:
  *
  * 1. 'all' mode — real-time playback capture driven by requestVideoFrameCallback.
  *    Every frame the browser actually presents is captured with its exact
@@ -13,10 +22,170 @@
  *    event and a presented frame (rVFC) so the captured canvas is guaranteed to
  *    show the requested time, fixing the "stale frame" races of naive
  *    seeked-only capture.
- *
- * Falls back to seeked-only waiting when requestVideoFrameCallback is
- * unavailable.
  */
+
+import { Input, ALL_FORMATS, BufferSource as MediaBufferSource, VideoSampleSink, EncodedPacketSink } from 'mediabunny';
+
+// ---------------------------------------------------------------------------
+// WebCodecs fast path
+// ---------------------------------------------------------------------------
+
+const hasWebCodecs = typeof VideoDecoder !== 'undefined' && typeof EncodedVideoChunk !== 'undefined';
+
+const TIME_EPS = 1e-4;
+
+/** Draws a decoded sample to a fresh canvas (rotation/aspect applied by mediabunny). */
+function sampleToCanvas(sample) {
+  const canvas = document.createElement('canvas');
+  canvas.width = sample.displayWidth;
+  canvas.height = sample.displayHeight;
+  sample.draw(canvas.getContext('2d'), 0, 0);
+  return canvas;
+}
+
+/**
+ * Demuxes with mediabunny and decodes through VideoDecoder.
+ *
+ * The displayed frame at time t is the last frame with pts <= t (what a seek
+ * to t would show); interval targets snap to that frame. Interval extraction
+ * uses mediabunny's sorted-timestamp pipeline, which seeks by keyframe and
+ * decodes each packet at most once.
+ */
+async function extractViaWebCodecs({ buffer, start, end, mode, interval, onProgress }) {
+  let lastPercent = -1;
+  const report = (label, percent) => {
+    if (!onProgress || percent === lastPercent) return;
+    lastPercent = percent;
+    onProgress({ label, percent });
+  };
+  report('Demuxing video...', 0);
+
+  const input = new Input({ source: new MediaBufferSource(buffer), formats: ALL_FORMATS });
+  try {
+    const track = await input.getPrimaryVideoTrack();
+    if (!track) throw new Error('No video track found.');
+
+    const decoderConfig = await track.getDecoderConfig();
+    if (!decoderConfig) throw new Error('Could not determine a decoder configuration.');
+    const support = await VideoDecoder.isConfigSupported(decoderConfig);
+    if (!support.supported) {
+      throw new Error(`Codec ${decoderConfig.codec} is not supported by this browser's WebCodecs decoder.`);
+    }
+
+    // computeDuration can report the last frame's start rather than its end
+    // for some containers (WebM); take whichever of the packet-derived and
+    // container-metadata durations is later so the tail of the range matches
+    // what a <video> element reports as duration.
+    const packetSink = new EncodedPacketSink(track);
+    const lastPacket = await packetSink.getPacket(Infinity, { metadataOnly: true });
+    const metadataDuration = await track.getDurationFromMetadata().catch(() => null);
+    const duration = Math.max(
+      await track.computeDuration(),
+      metadataDuration || 0,
+      lastPacket ? lastPacket.timestamp + (lastPacket.duration || 0) : 0
+    );
+    const rangeStart = Math.max(0, Math.min(start, duration));
+    const rangeEnd = Math.min(end, duration);
+    if (rangeStart >= rangeEnd) {
+      throw new Error('Start time must be less than end time.');
+    }
+
+    const sink = new VideoSampleSink(track);
+    const results = [];
+    const emit = (sample, time) => {
+      results.push({ index: results.length, time, canvas: sampleToCanvas(sample), enabled: true });
+    };
+
+    // Sync flags stored in containers can lie (e.g. every sample marked as a
+    // keyframe); verifying against the bitstream keeps decoding from starting
+    // on a delta frame.
+    const retrieval = { verifyKeyPackets: true };
+
+    if (mode === 'interval') {
+      const count = Math.floor((rangeEnd - rangeStart) / interval + 1e-6) + 1;
+      const targets = [];
+      for (let i = 0; i < count; i++) {
+        targets.push(Math.min(rangeStart + i * interval, duration));
+      }
+      // Clamp lookups into [first frame, last frame]: timestamps outside the
+      // track's frame range snap to the nearest frame, matching what a
+      // <video> seek would display.
+      const firstTimestamp = await track.getFirstTimestamp();
+      const lastTimestamp = lastPacket ? lastPacket.timestamp : duration;
+      const lookups = targets.map((t) => Math.min(Math.max(t, firstTimestamp), lastTimestamp));
+
+      const reportTarget = (i) => report(`Extracting frame ${i}/${targets.length}`, Math.round((i / targets.length) * 100));
+
+      // Fast plan: keyframe-seeking lookups, decoding only the GOPs that
+      // contain targets. Requires a working random-access index, which some
+      // containers lack (e.g. fragmented MP4s from MediaRecorder), so probe
+      // first and bail out if any lookup comes back empty.
+      let complete = false;
+      const probe = await packetSink.getKeyPacket(lookups[lookups.length - 1], { verifyKeyPackets: true }).catch(() => null);
+      if (probe) {
+        complete = true;
+        // Consecutive targets can resolve to the same sample object, so close
+        // a sample only once the iterator has moved past it.
+        let held = null;
+        let i = 0;
+        for await (const sample of sink.samplesAtTimestamps(lookups, retrieval)) {
+          if (!sample) {
+            complete = false;
+            break;
+          }
+          emit(sample, targets[i]);
+          if (held && held !== sample) held.close();
+          held = sample;
+          i++;
+          reportTarget(i);
+        }
+        if (held) held.close();
+      }
+
+      // Robust plan: one streaming decode pass over [first target, last
+      // target], snapping each target to the last frame at/before it.
+      if (!complete) {
+        results.length = 0;
+        let prev = null;
+        let ti = 0;
+        for await (const sample of sink.samples(lookups[0], lookups[lookups.length - 1] + TIME_EPS, retrieval)) {
+          while (ti < targets.length && sample.timestamp > lookups[ti] + TIME_EPS) {
+            emit(prev || sample, targets[ti]);
+            ti++;
+            reportTarget(ti);
+          }
+          if (prev) prev.close();
+          prev = sample;
+          if (ti >= targets.length) break;
+        }
+        while (ti < targets.length && prev) {
+          emit(prev, targets[ti]);
+          ti++;
+          reportTarget(ti);
+        }
+        if (prev) prev.close();
+      }
+    } else {
+      // Starts at the frame displayed at rangeStart; the +EPS keeps a frame
+      // landing exactly on rangeEnd inside the (exclusive) upper bound.
+      for await (const sample of sink.samples(rangeStart, rangeEnd + TIME_EPS, retrieval)) {
+        emit(sample, sample.timestamp);
+        sample.close();
+        const ratio = (sample.timestamp - rangeStart) / Math.max(rangeEnd - rangeStart, 0.001);
+        report(`Decoding frames... ${Math.round(ratio * 100)}%`, Math.round(ratio * 100));
+      }
+    }
+
+    if (!results.length) throw new Error('No frames found in the specified range.');
+    return results;
+  } finally {
+    if (typeof input.dispose === 'function') input.dispose();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Fallback path — <video> element playback/seek capture
+// ---------------------------------------------------------------------------
 
 const hasRVFC = typeof HTMLVideoElement !== 'undefined' &&
   'requestVideoFrameCallback' in HTMLVideoElement.prototype;
@@ -231,18 +400,9 @@ async function extractAllFramesFallback(video, start, end, onProgress) {
 }
 
 /**
- * Extracts frames from a video URL.
- *
- * @param {Object} params
- * @param {string} params.url - Object URL of the video
- * @param {number} params.start - Range start (seconds)
- * @param {number} params.end - Range end (seconds)
- * @param {'all'|'interval'} params.mode
- * @param {number} [params.interval] - Seconds between frames (interval mode)
- * @param {(info: {label: string, percent: number}) => void} [params.onProgress]
- * @returns {Promise<Array<{index:number, time:number, canvas:HTMLCanvasElement, enabled:boolean}>>}
+ * Extraction via a <video> element (playback capture / precise seeks).
  */
-export async function extractFrames({ url, start, end, mode, interval, onProgress }) {
+async function extractViaVideoElement({ url, start, end, mode, interval, onProgress }) {
   const video = createVideo(url);
   await waitForMetadata(video);
 
@@ -281,4 +441,42 @@ export async function extractFrames({ url, start, end, mode, interval, onProgres
   video.load();
 
   return frames;
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/**
+ * Extracts frames from a video URL. Containers mediabunny recognizes
+ * (MP4/MOV/WebM/MKV) decode through WebCodecs when available (much faster
+ * than realtime); everything else — and any WebCodecs failure — falls back
+ * to <video> element capture.
+ *
+ * @param {Object} params
+ * @param {string} params.url - Object URL of the video
+ * @param {number} params.start - Range start (seconds)
+ * @param {number} params.end - Range end (seconds)
+ * @param {'all'|'interval'} params.mode
+ * @param {number} [params.interval] - Seconds between frames (interval mode)
+ * @param {(info: {label: string, percent: number}) => void} [params.onProgress]
+ * @returns {Promise<Array<{index:number, time:number, canvas:HTMLCanvasElement, enabled:boolean}>>}
+ */
+export async function extractFrames({ url, start, end, mode, interval, onProgress }) {
+  if (hasWebCodecs) {
+    try {
+      const buffer = await (await fetch(url)).arrayBuffer();
+      return await extractViaWebCodecs({
+        buffer,
+        start,
+        end,
+        mode,
+        interval: Math.max(0.01, interval || 0.2),
+        onProgress,
+      });
+    } catch (err) {
+      console.warn('[videoExtractor] WebCodecs fast path failed; falling back to playback capture.', err);
+    }
+  }
+  return extractViaVideoElement({ url, start, end, mode, interval, onProgress });
 }

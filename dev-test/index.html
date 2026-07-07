@@ -1,0 +1,12 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>videoExtractor test</title>
+<script type="module">
+  import { extractFrames } from '../src/videoExtractor.js';
+  import * as MP4 from 'mp4box';
+  import * as MB from 'mediabunny';
+  window.extractFrames = extractFrames;
+  window.MP4 = MP4;
+  window.MB = MB;
+  window.__ready = true;
+</script>

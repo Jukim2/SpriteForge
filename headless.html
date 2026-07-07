@@ -1,0 +1,261 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>SpriteForge headless harness</title>
+<!--
+  Headless processing harness. Loaded by scripts/sf-headless.mjs inside a
+  Playwright-driven Chrome so the CLI can run the *exact same* pipeline the web
+  app uses — no reimplementation. GPU-heavy tools (AI upscale, AI background
+  removal) run on the real browser WebGPU path here, hitting the discrete GPU;
+  results match the app because it is the same code (src/*) and the same encoder
+  (src/app/utils.js encodeCanvasToBlob).
+
+  MUST live at the project root: upscaler.js / bgSegmenter.js resolve model and
+  resource URLs relative to window.location (e.g. new URL('models/x.onnx',
+  location.href)), so the harness has to sit at the same directory depth as
+  index.html for /models and /resources to resolve.
+
+  Exposes on window.sf:
+    process(dataUrl, opts)     1->1  upscale | bgremove | vectorize | compress | chromakey
+    slice(dataUrl, opts)       1->N  sprite-sheet -> individual sprites
+    extract(videoDataUrl, opts) 1->N video -> frames
+    gif(dataUrls[], opts)      N->1  frames -> animated GIF
+-->
+<script type="module">
+  import { upscaleImage, AI_MODELS, getAiBackend } from './src/upscaler.js';
+  import { segmentBackground, isSegModel, BG_SEG_MODELS } from './src/bgSegmenter.js';
+  import { vectorizeImage } from './src/vectorizer.js';
+  import { sliceGrid, sliceAuto, detectGridSize } from './src/slicer.js';
+  import { chromaKeyCanvas } from './src/chromakey.js';
+  import { extractFrames } from './src/videoExtractor.js';
+  import { encodeCanvasToBlob } from './src/app/utils.js';
+  import gifshot from 'gifshot';
+
+  function dataUrlToImage(dataUrl) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('Failed to decode source image'));
+      img.src = dataUrl;
+    });
+  }
+
+  async function dataUrlToCanvas(dataUrl) {
+    const img = await dataUrlToImage(dataUrl);
+    const c = document.createElement('canvas');
+    c.width = img.naturalWidth;
+    c.height = img.naturalHeight;
+    c.getContext('2d').drawImage(img, 0, 0);
+    return c;
+  }
+
+  function blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(fr.result);
+      fr.onerror = () => reject(fr.error);
+      fr.readAsDataURL(blob);
+    });
+  }
+
+  async function canvasToDataUrl(canvas, format, quality) {
+    const blob = await encodeCanvasToBlob(canvas, format, quality);
+    return blobToDataUrl(blob);
+  }
+
+  function cropToCanvas(img, x, y, w, h) {
+    const c = document.createElement('canvas');
+    c.width = w;
+    c.height = h;
+    c.getContext('2d').drawImage(img, x, y, w, h, 0, 0, w, h);
+    return c;
+  }
+
+  // Background removal: mirrors src/features/imgtools.js processImgToolsBgRemoval.
+  // Advanced ONNX seg models -> mask, composed as original x mask; imgly ISNet
+  // models -> the returned blob is already the cut-out foreground.
+  async function removeBg(canvas, model) {
+    if (isSegModel(model)) {
+      const { mask, backend } = await segmentBackground(canvas, model);
+      const out = document.createElement('canvas');
+      out.width = canvas.width;
+      out.height = canvas.height;
+      const ctx = out.getContext('2d');
+      ctx.drawImage(canvas, 0, 0);
+      ctx.globalCompositeOperation = 'destination-in';
+      ctx.drawImage(mask, 0, 0);
+      ctx.globalCompositeOperation = 'source-over';
+      return { canvas: out, backend };
+    }
+    const { removeBackground } = await import('@imgly/background-removal');
+    const srcBlob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+    // imgly's bundled ort has a flaky WebGPU init in some contexts; the app
+    // tries gpu then falls back to cpu (see src/features/imgtools.js). Mirror it.
+    const baseCfg = { model, publicPath: new URL('resources/', window.location.href).href };
+    const devices = navigator.gpu ? ['gpu', 'cpu'] : ['cpu'];
+    let blob, usedDevice, lastErr;
+    for (const device of devices) {
+      try {
+        blob = await removeBackground(srcBlob, { ...baseCfg, device });
+        usedDevice = device;
+        break;
+      } catch (err) {
+        lastErr = err;
+        console.warn(`imgly bg removal on '${device}' failed${device !== devices[devices.length - 1] ? ', falling back' : ''}:`, err.message);
+      }
+    }
+    if (!blob) throw lastErr;
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url; });
+    URL.revokeObjectURL(url);
+    const out = document.createElement('canvas');
+    out.width = canvas.width;
+    out.height = canvas.height;
+    out.getContext('2d').drawImage(img, 0, 0, out.width, out.height);
+    return { canvas: out, backend: usedDevice === 'gpu' ? 'webgpu' : 'wasm' };
+  }
+
+  window.sf = {
+    models: {
+      ai: Object.keys(AI_MODELS),
+      seg: Object.keys(BG_SEG_MODELS)
+    },
+    hasWebGpu: 'gpu' in navigator,
+
+    // ---- 1 -> 1 image tools ------------------------------------------------
+    async process(dataUrl, opts) {
+      const src = await dataUrlToCanvas(dataUrl);
+      const { tool, format = 'png', quality = 90 } = opts;
+
+      if (tool === 'upscale') {
+        const out = await upscaleImage(src, {
+          algorithm: opts.algorithm,
+          scale: opts.scale,
+          aiModel: opts.aiModel
+        });
+        return {
+          dataUrl: await canvasToDataUrl(out, format, quality),
+          backend: opts.algorithm === 'ai' ? getAiBackend() : null,
+          width: out.width, height: out.height
+        };
+      }
+
+      if (tool === 'bgremove') {
+        const { canvas, backend } = await removeBg(src, opts.model);
+        return {
+          dataUrl: await canvasToDataUrl(canvas, format, quality),
+          backend, width: canvas.width, height: canvas.height
+        };
+      }
+
+      if (tool === 'chromakey') {
+        const out = document.createElement('canvas');
+        out.width = src.width;
+        out.height = src.height;
+        chromaKeyCanvas(src, out.getContext('2d'), {
+          color: opts.color,
+          tolerance: opts.tolerance,
+          contiguous: opts.contiguous,
+          despill: opts.despill
+        });
+        return {
+          dataUrl: await canvasToDataUrl(out, format, quality),
+          backend: null, width: out.width, height: out.height
+        };
+      }
+
+      if (tool === 'vectorize') {
+        const svg = await vectorizeImage(src, {
+          mode: opts.mode, preset: opts.preset, colors: opts.colors
+        });
+        return { svg, backend: null };
+      }
+
+      if (tool === 'compress') {
+        return {
+          dataUrl: await canvasToDataUrl(src, format, quality),
+          backend: null, width: src.width, height: src.height
+        };
+      }
+
+      throw new Error(`Unknown tool: ${tool}`);
+    },
+
+    // ---- 1 -> N : sprite-sheet slicing ------------------------------------
+    async slice(dataUrl, opts) {
+      const img = await dataUrlToImage(dataUrl);
+      const { format = 'png', quality = 90 } = opts;
+      const alpha = opts.alphaThreshold ?? 5;
+      const skipEmpty = opts.skipEmpty !== false;
+
+      let slices;
+      if (opts.auto) {
+        slices = sliceAuto(img, opts.minWidth ?? 8, opts.minHeight ?? 8, alpha, opts.rowYThreshold ?? 12, opts.mergeGap ?? 0);
+      } else {
+        let gw = opts.gridW, gh = opts.gridH;
+        if (!gw || !gh) { const g = detectGridSize(img, alpha); gw = gw || g.width; gh = gh || g.height; }
+        slices = sliceGrid(img, gw, gh, skipEmpty, alpha);
+      }
+
+      const items = [];
+      for (const s of slices) {
+        if (s.enabled === false) continue;
+        const canvas = cropToCanvas(img, s.x, s.y, s.width, s.height);
+        items.push({
+          row: s.row, col: s.col,
+          dataUrl: await canvasToDataUrl(canvas, format, quality)
+        });
+      }
+      return { items, backend: null, count: items.length };
+    },
+
+    // ---- 1 -> N : video frame extraction ----------------------------------
+    async extract(videoDataUrl, opts) {
+      const blob = await (await fetch(videoDataUrl)).blob();
+      const url = URL.createObjectURL(blob);
+      try {
+        const frames = await extractFrames({
+          url,
+          start: opts.start ?? 0,
+          end: opts.end,  // undefined => whole clip
+          mode: opts.mode || 'all',
+          interval: opts.interval
+        });
+        const { format = 'png', quality = 90 } = opts;
+        const items = [];
+        for (const f of frames) {
+          items.push({
+            time: +f.time.toFixed(4),
+            dataUrl: await canvasToDataUrl(f.canvas, format, quality)
+          });
+        }
+        return { items, backend: null, count: items.length };
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    },
+
+    // ---- N -> 1 : animated GIF (same params as animPlayer.js) --------------
+    async gif(dataUrls, opts) {
+      if (!dataUrls.length) throw new Error('No frames provided for GIF');
+      const first = await dataUrlToImage(dataUrls[0]);
+      const gifWidth = opts.width || first.naturalWidth;
+      const gifHeight = opts.height || first.naturalHeight;
+      const fps = opts.fps || 12;
+      const result = await new Promise((resolve, reject) => {
+        gifshot.createGIF({
+          images: dataUrls,
+          interval: 1 / fps,
+          gifWidth, gifHeight,
+          numWorkers: 2
+        }, (obj) => {
+          if (obj.error) reject(new Error(obj.errorMsg || 'GIF creation failed'));
+          else resolve(obj.image);
+        });
+      });
+      return { dataUrl: result, width: gifWidth, height: gifHeight, frames: dataUrls.length };
+    }
+  };
+
+  window.__ready = true;
+</script>

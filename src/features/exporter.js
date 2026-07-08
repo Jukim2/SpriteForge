@@ -17,6 +17,12 @@ export function updateExportStats() {
     els.btnExportActive.textContent = 'Export Selected';
   }
 
+  // Send-to-Image-Tools handoff follows the same rule as the single-file export:
+  // enabled only when the active sheet has at least one selected slice.
+  if (els.btnSlicesToImgTools) {
+    els.btnSlicesToImgTools.disabled = activeExportCount === 0;
+  }
+
   // Batch export stats
   let totalEnabledSlices = 0;
   state.files.forEach(f => {
@@ -32,7 +38,7 @@ export function updateExportStats() {
 // ----------------------------------------------------
 // File Exporting & ZIP Compression (JSZip)
 // ----------------------------------------------------
-function getFileName(template, row, col, index, sourceName) {
+export function getFileName(template, row, col, index, sourceName) {
   const cleanName = sourceName.substring(0, sourceName.lastIndexOf('.')) || sourceName;
   return template
     .replace(/{row}/g, String(row).padStart(2, '0'))
@@ -41,97 +47,103 @@ function getFileName(template, row, col, index, sourceName) {
     .replace(/{filename}/g, cleanName);
 }
 
-// Helper to convert canvas region to blob
-function getSliceBlob(fileObj, slice) {
-  return new Promise((resolve) => {
-    const s = fileObj.settings;
-    let targetW = slice.width;
-    let targetH = slice.height;
+// Render a single slice (with the file's rematch settings applied) onto a
+// fresh canvas. Used for ZIP export and for handing slices to Image Tools.
+export function getSliceCanvas(fileObj, slice) {
+  const s = fileObj.settings;
+  let targetW = slice.width;
+  let targetH = slice.height;
 
-    // Apply Rematch if enabled
-    if (s.rematchEnabled) {
-      if (s.rematchMode === 'custom') {
-        targetW = s.rematchWidth;
-        targetH = s.rematchHeight;
-      } else if (s.rematchMode === 'largest') {
-        // Find largest slice in this file
-        let maxW = 0;
-        let maxH = 0;
-        fileObj.slices.forEach(sl => {
-          if (sl.width > maxW) maxW = sl.width;
-          if (sl.height > maxH) maxH = sl.height;
-        });
-        targetW = maxW;
-        targetH = maxH;
-      }
+  // Apply Rematch if enabled
+  if (s.rematchEnabled) {
+    if (s.rematchMode === 'custom') {
+      targetW = s.rematchWidth;
+      targetH = s.rematchHeight;
+    } else if (s.rematchMode === 'largest') {
+      // Find largest slice in this file
+      let maxW = 0;
+      let maxH = 0;
+      fileObj.slices.forEach(sl => {
+        if (sl.width > maxW) maxW = sl.width;
+        if (sl.height > maxH) maxH = sl.height;
+      });
+      targetW = maxW;
+      targetH = maxH;
     }
+  }
 
-    const canvas = document.createElement('canvas');
-    canvas.width = targetW;
-    canvas.height = targetH;
-    const ctx = canvas.getContext('2d');
-    
-    const imgSource = fileObj.processedCanvas || fileObj.imgElement;
-    
-    if (!s.rematchEnabled) {
-      // Normal export
+  const canvas = document.createElement('canvas');
+  canvas.width = targetW;
+  canvas.height = targetH;
+  const ctx = canvas.getContext('2d');
+
+  const imgSource = fileObj.processedCanvas || fileObj.imgElement;
+
+  if (!s.rematchEnabled) {
+    // Normal export
+    ctx.drawImage(
+      imgSource,
+      slice.x, slice.y, slice.width, slice.height,
+      0, 0, slice.width, slice.height
+    );
+  } else {
+    // Rematched export
+    const fit = s.rematchFit || 'contain';
+    let dx = 0, dy = 0, dw = targetW, dh = targetH;
+
+    if (fit === 'stretch') {
+      // Stretch ignores aspect ratio
       ctx.drawImage(
         imgSource,
         slice.x, slice.y, slice.width, slice.height,
-        0, 0, slice.width, slice.height
+        0, 0, targetW, targetH
       );
     } else {
-      // Rematched export
-      const fit = s.rematchFit || 'contain';
-      let dx = 0, dy = 0, dw = targetW, dh = targetH;
+      // Keep aspect ratio for contain/cover
+      const ratioSrc = slice.width / slice.height;
+      const ratioDst = targetW / targetH;
 
-      if (fit === 'stretch') {
-        // Stretch ignores aspect ratio
-        ctx.drawImage(
-          imgSource,
-          slice.x, slice.y, slice.width, slice.height,
-          0, 0, targetW, targetH
-        );
-      } else {
-        // Keep aspect ratio for contain/cover
-        const ratioSrc = slice.width / slice.height;
-        const ratioDst = targetW / targetH;
-
-        if (fit === 'contain') {
-          if (ratioSrc > ratioDst) {
-            // Source is wider, fit width
-            dw = targetW;
-            dh = targetW / ratioSrc;
-            dy = (targetH - dh) / 2;
-          } else {
-            // Source is taller, fit height
-            dh = targetH;
-            dw = targetH * ratioSrc;
-            dx = (targetW - dw) / 2;
-          }
-        } else if (fit === 'cover') {
-          if (ratioSrc > ratioDst) {
-            // Source is wider, fill height, crop width
-            dh = targetH;
-            dw = targetH * ratioSrc;
-            dx = (targetW - dw) / 2; // will be negative
-          } else {
-            // Source is taller, fill width, crop height
-            dw = targetW;
-            dh = targetW / ratioSrc;
-            dy = (targetH - dh) / 2; // will be negative
-          }
+      if (fit === 'contain') {
+        if (ratioSrc > ratioDst) {
+          // Source is wider, fit width
+          dw = targetW;
+          dh = targetW / ratioSrc;
+          dy = (targetH - dh) / 2;
+        } else {
+          // Source is taller, fit height
+          dh = targetH;
+          dw = targetH * ratioSrc;
+          dx = (targetW - dw) / 2;
         }
-        
-        ctx.drawImage(
-          imgSource,
-          slice.x, slice.y, slice.width, slice.height,
-          Math.round(dx), Math.round(dy), Math.round(dw), Math.round(dh)
-        );
+      } else if (fit === 'cover') {
+        if (ratioSrc > ratioDst) {
+          // Source is wider, fill height, crop width
+          dh = targetH;
+          dw = targetH * ratioSrc;
+          dx = (targetW - dw) / 2; // will be negative
+        } else {
+          // Source is taller, fill width, crop height
+          dw = targetW;
+          dh = targetW / ratioSrc;
+          dy = (targetH - dh) / 2; // will be negative
+        }
       }
+
+      ctx.drawImage(
+        imgSource,
+        slice.x, slice.y, slice.width, slice.height,
+        Math.round(dx), Math.round(dy), Math.round(dw), Math.round(dh)
+      );
     }
-    
-    canvas.toBlob((blob) => resolve(blob), 'image/png');
+  }
+
+  return canvas;
+}
+
+// Helper to convert canvas region to blob
+function getSliceBlob(fileObj, slice) {
+  return new Promise((resolve) => {
+    getSliceCanvas(fileObj, slice).toBlob((blob) => resolve(blob), 'image/png');
   });
 }
 

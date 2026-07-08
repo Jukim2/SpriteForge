@@ -42,8 +42,8 @@ export function isRegionEmpty(ctx, x, y, width, height, alphaThreshold = 5) {
  * @param {HTMLImageElement} image 
  * @param {number} spriteWidth 
  * @param {number} spriteHeight 
- * @param {boolean} skipEmpty 
- * @param {number} alphaThreshold 
+ * @param {boolean} skipEmpty - When true, fully transparent cells are kept but start disabled (unchecked)
+ * @param {number} alphaThreshold
  * @returns {Array} List of slice objects
  */
 export function sliceGrid(image, spriteWidth, spriteHeight, skipEmpty = true, alphaThreshold = 5) {
@@ -68,9 +68,6 @@ export function sliceGrid(image, spriteWidth, spriteHeight, skipEmpty = true, al
       const y = r * spriteHeight;
 
       const empty = isRegionEmpty(ctx, x, y, spriteWidth, spriteHeight, alphaThreshold);
-      if (skipEmpty && empty) {
-        continue;
-      }
 
       slices.push({
         id: id++,
@@ -81,7 +78,10 @@ export function sliceGrid(image, spriteWidth, spriteHeight, skipEmpty = true, al
         row: r,
         col: c,
         isEmpty: empty,
-        enabled: true // user can toggle this in the UI
+        // Empty cells stay in the grid but start unchecked when skipEmpty is on,
+        // so the user still sees them and can re-enable a false positive. Export
+        // and the headless CLI both filter on `enabled`, so they're excluded.
+        enabled: !(skipEmpty && empty)
       });
     }
   }
@@ -98,7 +98,7 @@ export function sliceGrid(image, spriteWidth, spriteHeight, skipEmpty = true, al
  * @param {Object} region - The bounding region { x, y, width, height }
  * @param {number[]} colLines - Array of x-coordinates for vertical dividers (relative to image, sorted ascending)
  * @param {number[]} rowLines - Array of y-coordinates for horizontal dividers (relative to image, sorted ascending)
- * @param {boolean} skipEmpty - Whether to skip fully transparent cells
+ * @param {boolean} skipEmpty - When true, fully transparent cells are kept but start disabled (unchecked)
  * @param {number} alphaThreshold - Alpha threshold for transparency check
  * @returns {Array} List of slice objects
  */
@@ -133,9 +133,6 @@ export function sliceCustomGrid(image, region, colLines, rowLines, skipEmpty = t
       if (w <= 0 || h <= 0) continue;
 
       const empty = isRegionEmpty(ctx, x, y, w, h, alphaThreshold);
-      if (skipEmpty && empty) {
-        continue;
-      }
 
       slices.push({
         id: id++,
@@ -146,7 +143,9 @@ export function sliceCustomGrid(image, region, colLines, rowLines, skipEmpty = t
         row: r,
         col: c,
         isEmpty: empty,
-        enabled: true
+        // See sliceGrid: empty cells are kept but auto-unchecked when skipEmpty
+        // is on, rather than dropped, so nothing silently disappears.
+        enabled: !(skipEmpty && empty)
       });
     }
   }

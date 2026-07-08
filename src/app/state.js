@@ -79,6 +79,7 @@ export const state = {
     activeId: null,
     dirHandle: null, // FileSystemDirectoryHandle when a folder was opened (Chrome/Edge)
     zoom: 1.0,
+    viewMode: 'compare', // 'compare' (single side-by-side) | 'grid' (all files at once)
     tool: 'upscale', // 'upscale' | 'bgremove' | 'vector' | 'compress'
     isProcessing: false,
     brush: {

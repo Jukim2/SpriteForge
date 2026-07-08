@@ -3,8 +3,11 @@
 // top level only declares functions; cross-module calls happen at event time.
 import { state, getActiveFile } from '../../app/state.js';
 import { els } from '../../app/dom.js';
-import { updateExportStats } from '../exporter.js';
+import { showToast } from '../../app/ui.js';
+import { switchWorkspaceMode } from '../../app/workspace.js';
+import { updateExportStats, getSliceCanvas, getFileName } from '../exporter.js';
 import { updateAnimationPlayer } from '../animPlayer.js';
+import { addCanvasesToImgTools } from '../imgtools.js';
 import { drawCanvas } from './canvas.js';
 
 // ----------------------------------------------------
@@ -97,6 +100,25 @@ export function renderPreviews() {
   updateAnimationPlayer();
 }
 
+// Hand the enabled slices of the active sheet to Image Tools so they can be
+// upscaled / bg-removed / compressed without an export round-trip. Uses the
+// same rematch + naming rules as the ZIP export.
+function sendSlicesToImgTools() {
+  const activeFile = getActiveFile();
+  const enabled = activeFile ? activeFile.slices.filter(s => s.enabled) : [];
+  if (enabled.length === 0) {
+    showToast('No Slices Selected', 'Enable at least one slice to send it to Image Tools.', 'warning');
+    return;
+  }
+  const template = activeFile.settings.namingTemplate;
+  const items = enabled.map(slice => ({
+    name: `${getFileName(template, slice.row, slice.col, slice.id + 1, activeFile.name)}.png`,
+    canvas: getSliceCanvas(activeFile, slice)
+  }));
+  addCanvasesToImgTools(items);
+  switchWorkspaceMode('imgtools');
+}
+
 function toggleAllSlices() {
   const activeFile = getActiveFile();
   if (!activeFile) return;
@@ -111,4 +133,5 @@ function toggleAllSlices() {
 
 export function bindPreviewEvents() {
   els.btnToggleAllSlices.addEventListener('click', toggleAllSlices);
+  els.btnSlicesToImgTools.addEventListener('click', sendSlicesToImgTools);
 }

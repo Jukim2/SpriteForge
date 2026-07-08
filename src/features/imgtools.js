@@ -6,6 +6,10 @@ import { state, processingQueue } from '../app/state.js';
 import { els } from '../app/dom.js';
 import { encodeCanvasToBlob, formatBytes, downloadBlob } from '../app/utils.js';
 import { showToast } from '../app/ui.js';
+// NOTE: intentional import cycle (workspace <-> imgtools <-> slicer/files),
+// safe because all cross-module calls happen at event time.
+import { switchWorkspaceMode } from '../app/workspace.js';
+import { addFilesToSlicer } from './slicer/files.js';
 
 // ----------------------------------------------------
 // Image Tools Workspace (Upscale / Vectorize)
@@ -13,6 +17,39 @@ import { showToast } from '../app/ui.js';
 
 function getActiveImgToolsFile() {
   return state.imgTools.files.find(f => f.id === state.imgTools.activeId) || null;
+}
+
+function cloneCanvas(source) {
+  const copy = document.createElement('canvas');
+  copy.width = source.width;
+  copy.height = source.height;
+  copy.getContext('2d').drawImage(source, 0, 0);
+  return copy;
+}
+
+// Entry point for other workspaces (slicer slices, video frames) to hand
+// canvases straight into the Image Tools queue without a file round-trip.
+// items: [{ name, canvas, bytes? }]. Canvases are cloned because callers may
+// keep mutating theirs (e.g. video frames re-run background removal).
+export function addCanvasesToImgTools(items) {
+  let firstId = null;
+  for (const { name, canvas, bytes } of items) {
+    const fileObj = {
+      id: `imgtool_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      name,
+      relPath: name,
+      canvas: cloneCanvas(canvas),
+      origBytes: bytes || 0,
+      result: null,
+      resultLabel: ''
+    };
+    state.imgTools.files.push(fileObj);
+    if (!firstId) firstId = fileObj.id;
+  }
+  if (firstId) state.imgTools.activeId = firstId;
+  renderImgToolsFileList();
+  renderImgToolsView();
+  showToast('Received in Image Tools', `Added ${items.length} image${items.length !== 1 ? 's' : ''} to the queue.`, 'success');
 }
 
 function syncImgToolsSettingsFromUI() {
@@ -63,6 +100,8 @@ function updateImgToolsButtons() {
   const hasResults = state.imgTools.files.some(f => f.result);
   els.btnImgToolsDownloadAll.disabled = busy || !hasResults;
   els.btnImgToolsSaveFolder.disabled = busy || !hasResults || !state.imgTools.dirHandle;
+  // Only raster output can be sliced; SVG results stay here.
+  els.btnImgToolsToSlicer.disabled = busy || !(activeFile && activeFile.result && activeFile.result.type === 'raster');
   updateImgToolsExportSummary(activeFile, hasResults);
 }
 
@@ -317,10 +356,63 @@ function showImgToolsLoading(show, text) {
 }
 
 
+// Promote the current result to be the file's input so the next tool runs on
+// it (upscale -> bg-remove -> compress chains without an export round-trip).
+// Only raster results chain; SVG is terminal. Returns true when promoted.
+function commitResultAsInput(fileObj) {
+  const r = fileObj.result;
+  if (!r || r.type !== 'raster' || r.canvas === fileObj.canvas) return false;
+  fileObj.history = fileObj.history || [];
+  fileObj.history.push({ canvas: fileObj.canvas, origBytes: fileObj.origBytes });
+  fileObj.canvas = r.canvas;
+  fileObj.origBytes = r.bytes || 0;
+  // The input pixels changed, so cached AI masks and brush state are stale.
+  fileObj.bgAiMask = null;
+  fileObj.bgAiModel = null;
+  fileObj.bgMask = null;
+  fileObj.bgUndo = [];
+  fileObj.bgRedo = [];
+  fileObj.result = null;
+  fileObj.resultLabel = '';
+  fileObj.resultSuffix = '';
+  return true;
+}
+
+// Reset a file back to the canvas it was originally loaded with, discarding
+// every chained step and the current result.
+function imgToolsRevertToOriginal() {
+  const fileObj = getActiveImgToolsFile();
+  if (!fileObj || !fileObj.history || fileObj.history.length === 0) return;
+  const first = fileObj.history[0];
+  fileObj.canvas = first.canvas;
+  fileObj.origBytes = first.origBytes;
+  fileObj.history = [];
+  fileObj.result = null;
+  fileObj.resultLabel = '';
+  fileObj.resultSuffix = '';
+  fileObj.resultTool = null;
+  fileObj.bgAiMask = null;
+  fileObj.bgAiModel = null;
+  fileObj.bgMask = null;
+  fileObj.bgUndo = [];
+  fileObj.bgRedo = [];
+  renderImgToolsFileList();
+  renderImgToolsView();
+  showToast('Reverted', `${fileObj.name} is back to its original image.`, 'info');
+}
+
 async function processImgToolsFile(fileObj) {
   syncImgToolsSettingsFromUI();
   const s = state.imgTools.settings;
   const onProgress = ({ label }) => showImgToolsLoading(true, `${fileObj.name}: ${label}`);
+
+  // Chain: running a *different* tool on a processed file continues from the
+  // result. Re-running the same tool replaces the result (settings retry).
+  let chained = false;
+  if (fileObj.result && fileObj.resultTool && fileObj.resultTool !== state.imgTools.tool) {
+    chained = commitResultAsInput(fileObj);
+  }
+  fileObj.resultTool = state.imgTools.tool;
 
   if (state.imgTools.tool === 'compress') {
     // Pure re-encode of the source pixels — no resize. The win is format (WebP).
@@ -362,6 +454,7 @@ async function processImgToolsFile(fileObj) {
     fileObj.resultLabel = `SVG ${s.vectorMode === 'pixel' ? 'Pixel Perfect' : `Trace (${s.vectorPreset})`} • ${kb} KB`;
     fileObj.resultSuffix = `_${s.vectorMode === 'pixel' ? 'pixel' : 'trace'}`;
   }
+  return chained;
 }
 
 // ----------------------------------------------------
@@ -663,6 +756,7 @@ async function imgToolsProcess(filesToProcess) {
   updateImgToolsButtons();
 
   let failed = 0;
+  let chainedCount = 0;
   try {
     for (let i = 0; i < filesToProcess.length; i++) {
       const fileObj = filesToProcess[i];
@@ -670,7 +764,7 @@ async function imgToolsProcess(filesToProcess) {
       // Give the overlay a frame to paint before heavy synchronous work.
       await new Promise(r => setTimeout(r, 30));
       try {
-        await processImgToolsFile(fileObj);
+        if (await processImgToolsFile(fileObj)) chainedCount++;
       } catch (err) {
         console.error(err);
         failed++;
@@ -686,11 +780,28 @@ async function imgToolsProcess(filesToProcess) {
 
   const succeeded = filesToProcess.length - failed;
   if (succeeded > 0) {
-    showToast('Processing Complete', `Processed ${succeeded} image${succeeded > 1 ? 's' : ''}.`, 'success');
+    const chainNote = chainedCount > 0 ? ` Continued from the previous result for ${chainedCount} of them — use "Revert to Original" to undo.` : '';
+    showToast('Processing Complete', `Processed ${succeeded} image${succeeded > 1 ? 's' : ''}.${chainNote}`, 'success');
   }
 }
 
 export function renderImgToolsView() {
+  // View-mode chrome: compare (side-by-side) vs grid (all files at once).
+  const gridMode = state.imgTools.viewMode === 'grid';
+  els.imgToolsCompare.classList.toggle('hidden', gridMode);
+  els.imgToolsGridView.classList.toggle('hidden', !gridMode);
+  els.btnImgToolsViewCompare.classList.toggle('active', !gridMode);
+  els.btnImgToolsViewGrid.classList.toggle('active', gridMode);
+  // Zoom controls only make sense in the single-image compare view.
+  [els.btnImgToolsZoomIn, els.btnImgToolsZoomOut, els.btnImgToolsZoomFit, els.btnImgToolsZoomReset]
+    .forEach(b => { if (b) b.disabled = gridMode; });
+
+  if (gridMode) {
+    renderImgToolsGrid();
+    updateImgToolsButtons();
+    return;
+  }
+
   const activeFile = getActiveImgToolsFile();
 
   // Auto-fit each image the first time it is shown, so large sources are
@@ -710,6 +821,11 @@ export function renderImgToolsView() {
   els.imgToolsPaneResult.innerHTML = '';
   bgResultViewCanvas = null;
 
+  // Original-pane header reflects chained steps and offers a way back.
+  const chainSteps = (activeFile && activeFile.history && activeFile.history.length) || 0;
+  els.imgToolsOriginalLabel.textContent = chainSteps > 0 ? `Input · Step ${chainSteps + 1}` : 'Original';
+  els.btnImgToolsRevert.classList.toggle('hidden', chainSteps === 0);
+
   if (!activeFile) {
     updateBrushToolbar();
     els.imgToolsPaneOriginal.innerHTML = '<div class="no-sprites-msg" style="border: none; background: transparent; padding: 60px 20px;">Load an image to begin.</div>';
@@ -724,7 +840,8 @@ export function renderImgToolsView() {
 
   const wrapEl = (el) => {
     el.style.display = 'block';
-    el.style.margin = '16px';
+    // Centering is handled by `.imgtools-pane > * { margin: auto }` in CSS.
+    el.style.flex = '0 0 auto';
     el.style.width = `${displayW}px`;
     el.style.height = 'auto';
     if (zoom >= 3) el.style.imageRendering = 'pixelated';
@@ -773,6 +890,82 @@ function setImgToolsZoom(level) {
   renderImgToolsView();
 }
 
+// Switch between the single-image compare view and the all-files grid.
+function setImgToolsViewMode(mode) {
+  if (state.imgTools.viewMode === mode) return;
+  state.imgTools.viewMode = mode;
+  renderImgToolsView();
+}
+
+// Grid "view all": one card per loaded file showing its result (or original if
+// not processed yet). Clicking a card selects it and returns to compare view.
+function renderImgToolsGrid() {
+  const grid = els.imgToolsGridView;
+  grid.innerHTML = '';
+  const files = state.imgTools.files;
+
+  els.imgToolsInfo.textContent = files.length
+    ? `${files.length} image${files.length > 1 ? 's' : ''}`
+    : 'No image loaded';
+  els.imgToolsResultMeta.textContent = '';
+  els.imgToolsZoomLevel.textContent = '';
+
+  if (!files.length) {
+    grid.innerHTML = '<div class="no-sprites-msg" style="border:none;background:transparent;margin:auto;">Load images to see them all here.</div>';
+    return;
+  }
+
+  const frag = document.createDocumentFragment();
+  files.forEach(fileObj => {
+    const done = !!fileObj.result;
+    const card = document.createElement('div');
+    card.className = 'imgtools-grid-card'
+      + (fileObj.id === state.imgTools.activeId ? ' active' : '')
+      + (done ? ' done' : '');
+    card.title = fileObj.name;
+
+    const thumb = document.createElement('div');
+    thumb.className = 'imgtools-grid-thumb imgtools-checker';
+
+    let media;
+    const r = fileObj.result;
+    if (r && r.type === 'svg') {
+      media = document.createElement('img');
+      media.src = svgToDataUrl(r.svg);
+    } else {
+      const src = (r && r.canvas) ? r.canvas : fileObj.canvas;
+      media = document.createElement('canvas');
+      media.width = src.width;
+      media.height = src.height;
+      media.getContext('2d').drawImage(src, 0, 0);
+    }
+    media.className = 'imgtools-grid-img';
+    thumb.appendChild(media);
+    card.appendChild(thumb);
+
+    const label = document.createElement('div');
+    label.className = 'imgtools-grid-label';
+    const name = document.createElement('span');
+    name.className = 'imgtools-grid-name';
+    name.textContent = fileObj.name;
+    const badge = document.createElement('span');
+    badge.className = 'imgtools-grid-badge';
+    badge.textContent = done ? 'done' : `${fileObj.canvas.width}×${fileObj.canvas.height}`;
+    label.appendChild(name);
+    label.appendChild(badge);
+    card.appendChild(label);
+
+    card.addEventListener('click', () => {
+      state.imgTools.activeId = fileObj.id;
+      state.imgTools.viewMode = 'compare';
+      renderImgToolsFileList();
+      renderImgToolsView();
+    });
+    frag.appendChild(card);
+  });
+  grid.appendChild(frag);
+}
+
 // Tracks which file the automatic fit-on-first-view has been applied to.
 let lastAutoFitId = null;
 
@@ -805,6 +998,17 @@ async function imgToolsResultBlob(result) {
   if (result.type === 'svg') return new Blob([result.svg], { type: 'image/svg+xml' });
   if (result.blob) return result.blob;
   return encodeCanvasToBlob(result.canvas, result.format || 'png', result.quality);
+}
+
+// Reverse handoff: load the current result into the Sprite Slicer as if the
+// user had dropped the exported file there (reuses the full slicer pipeline).
+async function imgToolsSendToSlicer() {
+  const fileObj = getActiveImgToolsFile();
+  if (!fileObj || !fileObj.result || fileObj.result.type !== 'raster') return;
+  const blob = await imgToolsResultBlob(fileObj.result);
+  const file = new File([blob], imgToolsResultFilename(fileObj), { type: blob.type || 'image/png' });
+  switchWorkspaceMode('slicer');
+  addFilesToSlicer([file]);
 }
 
 async function imgToolsDownloadCurrent() {
@@ -935,6 +1139,14 @@ export function bindImgToolsEvents() {
   // Export actions
   els.btnImgToolsDownload.addEventListener('click', imgToolsDownloadCurrent);
   els.btnImgToolsDownloadAll.addEventListener('click', imgToolsDownloadAll);
+  els.btnImgToolsToSlicer.addEventListener('click', imgToolsSendToSlicer);
+
+  // Chain controls
+  els.btnImgToolsRevert.addEventListener('click', imgToolsRevertToOriginal);
+
+  // View mode (compare vs grid)
+  els.btnImgToolsViewCompare.addEventListener('click', () => setImgToolsViewMode('compare'));
+  els.btnImgToolsViewGrid.addEventListener('click', () => setImgToolsViewMode('grid'));
 
   // Zoom controls
   els.btnImgToolsZoomIn.addEventListener('click', () => setImgToolsZoom(state.imgTools.zoom * 1.25));

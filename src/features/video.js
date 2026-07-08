@@ -4,7 +4,9 @@ import { state } from '../app/state.js';
 import { els } from '../app/dom.js';
 import { detectCornerColor } from '../app/utils.js';
 import { showToast, showProgressBar, updateProgressBar } from '../app/ui.js';
+import { switchWorkspaceMode } from '../app/workspace.js';
 import { updateAnimationPlayer } from './animPlayer.js';
+import { addCanvasesToImgTools } from './imgtools.js';
 
 // ----------------------------------------------------
 // Video Workspace (frame extraction + bg removal)
@@ -322,6 +324,23 @@ async function applyVideoBgRemoval() {
       }
     }
   }
+}
+
+// Hand the enabled (background-removed) frames to Image Tools for further
+// processing — upscale, AI bg-removal, compression — without exporting first.
+function sendVideoFramesToImgTools() {
+  const frames = state.video.frames.filter(f => f.enabled);
+  if (frames.length === 0) {
+    showToast('No Frames', 'Extract video frames (and keep at least one enabled) first.', 'warning');
+    return;
+  }
+  const base = (state.video.file?.name || 'video').replace(/\.[^.]+$/, '');
+  const items = frames.map(f => ({
+    name: `${base}_frame_${String(f.index + 1).padStart(3, '0')}.png`,
+    canvas: f.processedCanvas
+  }));
+  addCanvasesToImgTools(items);
+  switchWorkspaceMode('imgtools');
 }
 
 function duplicateVideoFrame(index) {
@@ -670,6 +689,7 @@ export function bindVideoEvents() {
   });
 
   els.btnVideoExtract.addEventListener('click', extractVideoRangeFrames);
+  els.btnVideoToImgTools.addEventListener('click', sendVideoFramesToImgTools);
 
   els.wsVideoPlayer.addEventListener('timeupdate', () => {
     updateVideoTimeDisplay();

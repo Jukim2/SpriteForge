@@ -72,6 +72,7 @@ export const els = {
   
   previewCount: document.getElementById('preview-count'),
   btnToggleAllSlices: document.getElementById('btn-toggle-all-slices'),
+  btnSlicesToImgTools: document.getElementById('btn-slices-to-imgtools'),
   previewGrid: document.getElementById('preview-grid'),
   
   exportStats: document.getElementById('export-stats'),
@@ -124,6 +125,7 @@ export const els = {
   videoGridPlaceholder: document.getElementById('video-grid-placeholder'),
   videoToolbarInfo: document.getElementById('video-toolbar-info'),
   videoTimeDisplay: document.getElementById('video-time-display'),
+  btnVideoToImgTools: document.getElementById('btn-video-to-imgtools'),
   videoOptBgRemoval: document.getElementById('video-opt-bg-removal'),
   videoBgRemovalSettings: document.getElementById('video-bg-removal-settings'),
   videoOptBgRemovalMethod: document.getElementById('video-opt-bg-removal-method'),
@@ -191,6 +193,9 @@ export const els = {
   btnImgToolsDownloadAll: document.getElementById('btn-imgtools-download-all'),
   btnImgToolsOpenFolder: document.getElementById('btn-imgtools-open-folder'),
   btnImgToolsSaveFolder: document.getElementById('btn-imgtools-save-folder'),
+  btnImgToolsToSlicer: document.getElementById('btn-imgtools-to-slicer'),
+  imgToolsOriginalLabel: document.getElementById('imgtools-original-label'),
+  btnImgToolsRevert: document.getElementById('btn-imgtools-revert'),
   imgToolsFolderHint: document.getElementById('imgtools-folder-hint'),
   imgToolsLoadingOverlay: document.getElementById('imgtools-loading-overlay'),
   imgToolsLoadingText: document.getElementById('imgtools-loading-text'),
@@ -203,6 +208,10 @@ export const els = {
   btnImgToolsZoomReset: document.getElementById('btn-imgtools-zoom-reset'),
   imgToolsPaneOriginal: document.getElementById('imgtools-pane-original'),
   imgToolsPaneResult: document.getElementById('imgtools-pane-result'),
+  imgToolsCompare: document.querySelector('.imgtools-compare'),
+  imgToolsGridView: document.getElementById('imgtools-grid-view'),
+  btnImgToolsViewCompare: document.getElementById('btn-imgtools-view-compare'),
+  btnImgToolsViewGrid: document.getElementById('btn-imgtools-view-grid'),
   imgToolsOutputContent: document.getElementById('imgtools-output-content'),
   imgToolsExportSummary: document.getElementById('imgtools-export-summary')
 };

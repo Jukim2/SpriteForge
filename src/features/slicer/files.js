@@ -22,6 +22,10 @@ function handleFileSelect(e) {
   els.fileInput.value = ''; // Reset input so same file can be selected again
 }
 
+// Exported so other workspaces (Image Tools) can push results into the
+// slicer through the exact same pipeline as a user drop.
+export { handleFiles as addFilesToSlicer };
+
 function handleFiles(fileList) {
   const totalFiles = fileList.length;
 

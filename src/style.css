@@ -1518,7 +1518,93 @@ body.light-theme .video-frame-card {
   flex: 1;
   overflow: auto;
   position: relative;
+  display: flex;
+  padding: 16px;
 }
+/* Center the image (or placeholder) in the pane when it is smaller than the
+   viewport; margin:auto keeps content scrollable-from-start when it overflows,
+   avoiding the "can't scroll back to the top-left" bug of justify/align-center. */
+.imgtools-pane > * {
+  margin: auto;
+}
+/* ── Image Tools: "view all" grid ─────────────────────────────────── */
+.imgtools-grid-view {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+  padding: 16px;
+  align-content: start;
+  background: var(--bg-surface-solid);
+}
+.imgtools-grid-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  background: var(--bg-surface);
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.imgtools-grid-card:hover {
+  border-color: var(--primary);
+}
+.imgtools-grid-card.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 0 12px var(--accent-glow);
+}
+.imgtools-grid-thumb {
+  height: 150px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.imgtools-grid-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+.imgtools-grid-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-top: 1px solid var(--border-color);
+  font-size: 11px;
+}
+.imgtools-grid-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-main);
+}
+.imgtools-grid-badge {
+  flex-shrink: 0;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.imgtools-grid-card.done .imgtools-grid-badge {
+  color: var(--accent);
+}
+.imgtools-view-seg {
+  padding: 2px;
+  margin-right: 4px;
+}
+.imgtools-view-seg .control-btn {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+}
+
 .imgtools-checker {
   background-color: #12131a;
   background-image:

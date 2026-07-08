@@ -692,6 +692,17 @@ async function imgToolsProcess(filesToProcess) {
 
 export function renderImgToolsView() {
   const activeFile = getActiveImgToolsFile();
+
+  // Auto-fit each image the first time it is shown, so large sources are
+  // fully visible instead of a scrolled-in corner at 100%. Manual zoom
+  // afterwards is left untouched. Capped at 100% so small sprites don't blow up.
+  if (activeFile && activeFile.id !== lastAutoFitId) {
+    const fit = computeImgToolsFitZoom(activeFile);
+    if (fit !== null) {
+      state.imgTools.zoom = Math.min(1, fit);
+      lastAutoFitId = activeFile.id;
+    }
+  }
   const zoom = state.imgTools.zoom;
 
   // Original pane
@@ -762,14 +773,23 @@ function setImgToolsZoom(level) {
   renderImgToolsView();
 }
 
+// Tracks which file the automatic fit-on-first-view has been applied to.
+let lastAutoFitId = null;
+
+// Zoom level that fits the image inside the compare pane (minus the 16px
+// margins), or null while the pane is hidden and has no layout yet.
+function computeImgToolsFitZoom(fileObj) {
+  const paneW = els.imgToolsPaneOriginal.clientWidth - 32;
+  const paneH = els.imgToolsPaneOriginal.clientHeight - 32;
+  if (paneW <= 0 || paneH <= 0) return null;
+  return Math.min(paneW / fileObj.canvas.width, paneH / fileObj.canvas.height);
+}
+
 function imgToolsZoomToFit() {
   const activeFile = getActiveImgToolsFile();
   if (!activeFile) return;
-  const paneW = els.imgToolsPaneOriginal.clientWidth - 32;
-  const paneH = els.imgToolsPaneOriginal.clientHeight - 32;
-  if (paneW <= 0 || paneH <= 0) return;
-  const scale = Math.min(paneW / activeFile.canvas.width, paneH / activeFile.canvas.height);
-  setImgToolsZoom(scale);
+  const scale = computeImgToolsFitZoom(activeFile);
+  if (scale !== null) setImgToolsZoom(scale);
 }
 
 

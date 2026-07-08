@@ -38,7 +38,7 @@ folder name, and if still unsure a quick look at one or two of the actual images
 | Task | Game art / illustration / anime | Photo / realistic / product |
 |------|--------------------------------|------------------------------|
 | **upscale** | `anime-best` (default) | `general-best` |
-| **bgremove** | `anime-isnet` (default, GPU) — or `toonout` for the cleanest anime edges | `rmbg14` (GPU) |
+| **bgremove** | `anime-isnet` (default, GPU) — or `toonout` for the cleanest anime edges | `birefnet-matting` (GPU, best quality, 897MB) — or `rmbg14` (176MB, non-commercial license) |
 
 Fast/low-VRAM variants exist for upscale (`anime`, `general`) — only use them if
 the user asks for speed. For bgremove, `isnet` / `isnet_fp16` / `isnet_quint8`
@@ -73,7 +73,7 @@ Common:
 
 Per tool:
 - **upscale** — `--model <anime-best|general-best|anime|general>` · `--algo <ai|xbr|smooth|nearest>` · `--scale <2|3|4>`
-- **bgremove** — `--model <anime-isnet|toonout|rmbg14|isnet|isnet_fp16|isnet_quint8>`
+- **bgremove** — `--model <anime-isnet|toonout|birefnet-matting|rmbg14|isnet|isnet_fp16|isnet_quint8>`
 - **vectorize** — `--mode <pixel|trace>` · `--colors <1-8>`
 - **chromakey** — `--color <#00ff00>` · `--tolerance <0-100>` · `--no-contiguous` · `--despill <0-1>`
 - **slice** — `--grid <WxH>` (or `--auto` for connected-component detection) · `--no-skip-empty` · `--alpha <0-255>` · `--merge-gap <px>`
@@ -82,9 +82,10 @@ Per tool:
 
 ## GPU notes
 
-- AI upscale and the seg bgremove models (`anime-isnet`, `toonout`, `rmbg14`)
-  run on **WebGPU** (the discrete GPU). Add `--require-gpu` so a silent CPU
-  fallback fails loudly instead of running 10-50x slower.
+- AI upscale and the seg bgremove models (`anime-isnet`, `toonout`,
+  `birefnet-matting`, `rmbg14`) run on **WebGPU** (the discrete GPU). Add
+  `--require-gpu` so a silent CPU fallback fails loudly instead of running
+  10-50x slower. `toonout` and `birefnet-matting` are WebGPU-only.
 - The imgly models (`isnet*`) run on **CPU/WASM** by design — do NOT pass
   `--require-gpu` with those. Prefer `anime-isnet` for GPU background removal.
 - Output reports the backend per image, e.g. `done 384x384 [webgpu] (1.2s)`.

@@ -346,7 +346,7 @@ Common:
   --no-recursive       top-level only               --headed (debug)
 
 upscale:   --algo <ai|xbr|smooth|nearest> --model <anime-best|general-best|anime|general> --scale <2|3|4>
-bgremove:  --model <anime-isnet|toonout|rmbg14|isnet|isnet_fp16|isnet_quint8>
+bgremove:  --model <anime-isnet|toonout|birefnet-matting|rmbg14|isnet|isnet_fp16|isnet_quint8>
 vectorize: --mode <pixel|trace> --colors <1-8>
 chromakey: --color <#00ff00> --tolerance <0-100> --no-contiguous --despill <0-1>
 slice:     --grid <WxH> | --auto   --no-skip-empty --alpha <0-255> --merge-gap <px>

@@ -10,7 +10,10 @@
  * - 'toonout'     : BiRefNet fine-tuned for anime characters (ToonOut,
  *                   arXiv:2509.06839). Best edges on illustrated art.
  *                   WebGPU-only (BiRefNet cannot run on the wasm EP).
+ * - 'birefnet-matting' : BiRefNet-matting (MIT). Best open-source quality on
+ *                   photos — soft alpha matting on hair/fur. WebGPU-only.
  * - 'rmbg14'      : BRIA RMBG-1.4 (photo/product; non-commercial license).
+ *                   Kept as the photo option for machines without WebGPU.
  *
  * Models are too large to bundle, so they are downloaded from Hugging Face
  * on first use and persisted in OPFS — after that the feature works offline.

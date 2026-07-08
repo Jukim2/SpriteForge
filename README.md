@@ -28,8 +28,8 @@ npm install
 
 That's it. The AI models (`public/models/*.onnx`) are committed to the repo, so
 they come with the clone — no separate download. Background-removal seg models
-(anime-isnet / toonout / rmbg14) download from Hugging Face on first use and
-cache locally afterward.
+(anime-isnet / toonout / birefnet-matting / rmbg14) download from Hugging Face
+on first use and cache locally afterward.
 
 ---
 
@@ -100,8 +100,9 @@ Run `node scripts/sf-headless.mjs --help` for the full option list.
 ### GPU notes
 
 - AI upscale and the seg background-removal models (`anime-isnet`, `toonout`,
-  `rmbg14`) run on **WebGPU** (your discrete GPU). Add `--require-gpu` so a
-  silent CPU fallback fails loudly instead of running much slower.
+  `birefnet-matting`, `rmbg14`) run on **WebGPU** (your discrete GPU). Add
+  `--require-gpu` so a silent CPU fallback fails loudly instead of running
+  much slower. `toonout` and `birefnet-matting` are WebGPU-only.
 - The imgly models (`isnet`, `isnet_fp16`, `isnet_quint8`) run on **CPU/WASM**
   by design (imgly's bundled runtime can't init WebGPU here). They still work —
   just don't pass `--require-gpu` with them. **For GPU background removal, use

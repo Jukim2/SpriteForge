@@ -32,8 +32,8 @@ export const BG_SEG_MODELS = {
     shortLabel: 'ToonOut',
     // BiRefNet graphs cannot run on the ort-web wasm EP (an op pattern blows
     // the 4GB wasm heap with std::bad_alloc), so this model is WebGPU-only.
-    // (BiRefNet_lite from onnx-community is broken even on WebGPU — a jsep
-    // shader error — which is why there is no general BiRefNet entry here.)
+    // (The onnx-community BiRefNet exports don't work even on WebGPU — see
+    // the note on birefnet-matting below; only toonout-style exports run.)
     webgpuOnly: true,
     urls: {
       webgpu: 'https://huggingface.co/sprited/birefnet-toonout-onnx/resolve/main/birefnet-toonout-fp16.onnx'
@@ -43,6 +43,25 @@ export const BG_SEG_MODELS = {
     mean: IMAGENET_MEAN,
     std: IMAGENET_STD,
     sigmoid: false, // sigmoid baked into the export
+    minmax: false
+  },
+  'birefnet-matting': {
+    label: 'Photo / Product — BiRefNet-Matting',
+    shortLabel: 'BiRefNet-Matting',
+    // Highest-quality open model for photos (MIT license) — soft alpha matting
+    // on hair/fur, remove.bg-class edges. emrikol's export replaces the
+    // deformable convs with grid_sample so it runs on the ort-web WebGPU EP
+    // (the onnx-community BiRefNet exports do NOT — one of their fused shaders
+    // needs 17 storage buffers and WebGPU caps at 16). fp32-only export.
+    webgpuOnly: true,
+    urls: {
+      webgpu: 'https://huggingface.co/emrikol/birefnet-matting-onnx/resolve/main/birefnet-matting.onnx'
+    },
+    downloadMB: { webgpu: 897 },
+    size: 1024,
+    mean: IMAGENET_MEAN,
+    std: IMAGENET_STD,
+    sigmoid: true, // export outputs raw logits (verified: range ≈ -19..40)
     minmax: false
   },
   rmbg14: {
